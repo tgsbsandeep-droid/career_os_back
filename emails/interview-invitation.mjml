@@ -1,0 +1,99 @@
+<mjml lang="en" dir="ltr">
+  <mj-head>
+    <mj-title>{{EMAIL_TITLE}}</mj-title>
+    <mj-preview>{{PREVIEW}}</mj-preview>
+    <mj-breakpoint width="480px" />
+    <mj-font name="Inter" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" />
+    <mj-attributes>
+      <mj-all font-family="Inter, Arial, sans-serif" />
+      <mj-text padding="0" color="#12241c" font-size="15px" line-height="24px" />
+      <mj-section padding="0" />
+      <mj-column padding="0" />
+      <mj-button font-family="Inter, Arial, sans-serif" />
+    </mj-attributes>
+    <mj-html-attributes>
+      <mj-selector path=".email-heading div">
+        <mj-html-attribute name="role">heading</mj-html-attribute>
+        <mj-html-attribute name="aria-level">1</mj-html-attribute>
+      </mj-selector>
+    </mj-html-attributes>
+  </mj-head>
+  <mj-body background-color="#f7fbf9" width="600px">
+    <mj-section background-color="#146c45" padding="28px 32px">
+      <mj-column>
+        <mj-text color="#ffffff" font-size="13px" font-weight="700" letter-spacing="2px">
+          CAREEROS
+        </mj-text>
+      </mj-column>
+    </mj-section>
+
+    <mj-section background-color="#ffffff" padding="36px 32px 8px">
+      <mj-column>
+        <mj-text css-class="email-heading" font-size="26px" font-weight="700" line-height="34px" color="#12241c">
+          {{HEADLINE}}
+        </mj-text>
+        <mj-spacer height="12px" />
+        <mj-text color="#3d4d46" font-size="15px" line-height="24px">
+          Hi {{CANDIDATE_NAME}},
+        </mj-text>
+        <mj-spacer height="8px" />
+        <mj-text color="#3d4d46" font-size="15px" line-height="24px">
+          {{INTRO}}
+        </mj-text>
+      </mj-column>
+    </mj-section>
+
+    <mj-section background-color="#ffffff" padding="20px 32px 8px">
+      <mj-column>
+        <mj-table width="100%" cellpadding="0" cellspacing="0">
+          <tr>
+            <td style="padding:16px 18px;background-color:#f7fbf9;border:1px solid #e4eee9;border-radius:12px;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
+                <tr>
+                  <td style="padding:6px 0;font-family:Inter, Arial, sans-serif;font-size:12px;font-weight:700;letter-spacing:0.08em;color:#7a8b84;">ROLE</td>
+                  <td style="padding:6px 0;font-family:Inter, Arial, sans-serif;font-size:15px;font-weight:600;color:#12241c;text-align:right;">{{JOB_TITLE}}</td>
+                </tr>
+                <tr>
+                  <td style="padding:6px 0;font-family:Inter, Arial, sans-serif;font-size:12px;font-weight:700;letter-spacing:0.08em;color:#7a8b84;">DATE</td>
+                  <td style="padding:6px 0;font-family:Inter, Arial, sans-serif;font-size:15px;color:#12241c;text-align:right;">{{DATE}}</td>
+                </tr>
+                <tr>
+                  <td style="padding:6px 0;font-family:Inter, Arial, sans-serif;font-size:12px;font-weight:700;letter-spacing:0.08em;color:#7a8b84;">TIME</td>
+                  <td style="padding:6px 0;font-family:Inter, Arial, sans-serif;font-size:15px;color:#12241c;text-align:right;">{{TIME}}</td>
+                </tr>
+                <tr>
+                  <td style="padding:6px 0;font-family:Inter, Arial, sans-serif;font-size:12px;font-weight:700;letter-spacing:0.08em;color:#7a8b84;">MODE</td>
+                  <td style="padding:6px 0;font-family:Inter, Arial, sans-serif;font-size:15px;color:#12241c;text-align:right;">{{MODE}}</td>
+                </tr>
+                <tr>
+                  <td style="padding:6px 0;font-family:Inter, Arial, sans-serif;font-size:12px;font-weight:700;letter-spacing:0.08em;color:#7a8b84;vertical-align:top;">NOTES</td>
+                  <td style="padding:6px 0;font-family:Inter, Arial, sans-serif;font-size:15px;color:#12241c;text-align:right;">{{NOTES}}</td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+        </mj-table>
+      </mj-column>
+    </mj-section>
+
+    <mj-section background-color="#ffffff" padding="24px 32px 36px">
+      <mj-column>
+        <mj-button href="{{APPLICATIONS_URL}}" background-color="#146c45" color="#ffffff" font-size="15px" font-weight="700" border-radius="999px" inner-padding="14px 28px" align="left">
+          View interview details
+        </mj-button>
+        <mj-spacer height="16px" />
+        <mj-text color="#5b6b64" font-size="13px" line-height="20px">
+          You can also open this from My applications in CareerOS.
+        </mj-text>
+      </mj-column>
+    </mj-section>
+
+    <mj-section background-color="#f7fbf9" padding="20px 32px 32px">
+      <mj-column>
+        <mj-text color="#7a8b84" font-size="12px" line-height="18px" align="center">
+          CareerOS · interview invitation for {{JOB_TITLE}}
+        </mj-text>
+      </mj-column>
+    </mj-section>
+  </mj-body>
+</mjml>
