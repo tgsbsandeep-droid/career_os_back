@@ -77,6 +77,32 @@ npm run dev
 API: `http://localhost:5000`  
 Health: `GET /api/health`
 
+## Deploy on Render
+
+Render clones this repo into `/opt/render/project/src`. Do **not** start `node src/index.ts`.
+
+In the Render service settings:
+
+| Setting | Value |
+|---|---|
+| Runtime | Node |
+| Build Command | `npm install && npm run build` |
+| Start Command | `npm start` |
+
+If Start Command is left as `node index.js`, the root [`index.js`](index.js) shim still loads `dist/index.js`.
+
+Add these **environment variables** in Render (not in git):
+
+- `NODE_ENV=production`
+- `FRONTEND_URL` — live frontend URL, e.g. `https://your-app.onrender.com`
+- `SUPABASE_URL`
+- `SUPABASE_PUBLISHABLE_KEY`
+- `GEMINI_API_KEY`
+- `GEMINI_MODEL=gemini-3.6-flash`
+- Optional: `RESEND_API_KEY`, `MAIL_FROM`
+
+Never upload `.env` to Render git. Paste keys in the dashboard.
+
 ## Scripts
 
 | Command | What it does |
