@@ -12,8 +12,13 @@ node_modules
 # Build
 dist
 
-# Environment — commit only .env.example
+# Environment — never commit secrets. Only .env.example may be pushed.
 .env
+.env.local
+.env.*.local
+.env.development
+.env.production
+.env.staging
 .env.*
 !.env.example
 

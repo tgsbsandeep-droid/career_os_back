@@ -2,7 +2,7 @@
 
 Express 5 + TypeScript API for CareerOS. Includes Supabase schema/migrations and Gemini AI.
 
-This folder is a **standalone GitHub repo**. Keep `GEMINI_API_KEY` in `.env` only.
+This folder is a **standalone GitHub repo**. Put every third-party key in **one** gitignored file: [`backend/.env`](.env). Never commit or push it. Use [`.env.example`](.env.example) as the template.
 
 ## Stack
 
@@ -29,7 +29,7 @@ npm install
 copy .env.example .env
 ```
 
-Fill [`.env`](.env) (gitignored):
+Fill [`.env`](.env) (gitignored — never push this file). Required keys:
 
 ```
 PORT=5000
@@ -40,6 +40,8 @@ SUPABASE_PUBLISHABLE_KEY=sb_publishable_your_key
 GEMINI_API_KEY=your_gemini_api_key
 GEMINI_MODEL=gemini-3.6-flash
 ```
+
+Optional third-party keys live in the same file (Resend/SMTP email, Google/LinkedIn OAuth, Supabase service role). See [`.env.example`](.env.example) for the full list. The API loads **only** `backend/.env`.
 
 ## Database
 
