@@ -26,7 +26,10 @@ function corsOrigins() {
     .split(",")
     .map((value) => value.trim().replace(/\/$/, ""))
     .filter(Boolean);
-  if (!listed.length) return ["http://localhost:5173"];
+  if (!listed.length) {
+    // Default: allow local dev + the live Cloudflare Pages deployment
+    return ["http://localhost:5173", "https://career-os.pages.dev"];
+  }
   return listed;
 }
 
