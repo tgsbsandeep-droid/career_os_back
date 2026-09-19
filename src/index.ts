@@ -15,7 +15,19 @@ const requiredEnv = [
 
 const missingEnv = requiredEnv.filter((key) => !String(process.env[key] ?? "").trim());
 if (missingEnv.length) {
-  throw new Error(`Missing required env in backend/.env: ${missingEnv.join(", ")}`);
+  throw new Error(`Missing required env: ${missingEnv.join(", ")}. Set them in backend/.env locally, or in the host dashboard (Render Environment) for production.`);
+}
+
+function corsOrigins() {
+  const raw = [process.env.FRONTEND_URL, process.env.FRONTEND_URLS]
+    .filter(Boolean)
+    .join(",");
+  const listed = raw
+    .split(",")
+    .map((value) => value.trim().replace(/\/$/, ""))
+    .filter(Boolean);
+  if (!listed.length) return ["http://localhost:5173"];
+  return listed;
 }
 
 // These modules read environment variables during initialization, so load them
@@ -35,9 +47,16 @@ const hiringRouter: express.Router = require("./routes/hiring");
 
 const app = express();
 
+const allowedOrigins = corsOrigins();
+
 app.use(
   cors({
-    origin: process.env.FRONTEND_URL || "http://localhost:5173",
+    origin(origin, callback) {
+      if (!origin) return callback(null, true);
+      const normalized = origin.replace(/\/$/, "");
+      if (allowedOrigins.includes(normalized)) return callback(null, true);
+      return callback(null, false);
+    },
     credentials: true,
   })
 );
