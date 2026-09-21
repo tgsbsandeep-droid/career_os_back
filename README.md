@@ -68,6 +68,21 @@ https://<your-app-domain>/auth/callback
 https://<your-app-domain>/auth/reset-password
 ```
 
+**Google Cloud** (required for “Continue with Google”). Google never sees the
+app origin. Add this exact URI on the **same** OAuth 2.0 Web client that is
+pasted into Supabase → Authentication → Providers → Google:
+
+```
+https://tudwilxhzsxtvufhvbch.supabase.co/auth/v1/callback
+```
+
+Live client ID for this project:
+
+`347864484607-ss8opc02n0j6mvkdgofouk1k8lm6uv76.apps.googleusercontent.com`
+
+`Error 400: redirect_uri_mismatch` means that URI is missing on **this** client
+(or you edited a different Client ID). See the root README Google Cloud section.
+
 ## Run
 
 ```bash
