@@ -27,8 +27,12 @@ function corsOrigins() {
     .map((value) => value.trim().replace(/\/$/, ""))
     .filter(Boolean);
   if (!listed.length) {
-    // Default: allow local dev + the live Cloudflare Pages deployment
-    return ["http://localhost:5173", "https://career-os.pages.dev"];
+    // Default: allow local dev + the live Cloudflare Pages deployments
+    return [
+      "http://localhost:5173",
+      "https://career-os.pages.dev",
+      "https://career-os-front.pages.dev",
+    ];
   }
   return listed;
 }
@@ -84,6 +88,13 @@ app.use("/api/admin", adminRouter);
 app.use("/api/notifications", notificationsRouter);
 app.use("/api/lms", lmsRouter);
 app.use("/api/hiring", hiringRouter);
+
+app.get("/", (_req, res) => {
+  res.json({
+    success: true,
+    message: "Career platform API is running",
+  });
+});
 
 app.get("/api/health", (_req, res) => {
   res.json({
