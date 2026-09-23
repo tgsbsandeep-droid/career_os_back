@@ -91,7 +91,7 @@ function buildJobFields(body: Record<string, unknown>, userId: string) {
     title: String(body.title ?? "").trim(),
     description: String(body.description ?? "").trim(),
     location: String(body.location ?? "Remote").trim() || "Remote",
-    company_name: String(body.company_name ?? "").trim() || "Company",
+    company_name: String(body.company_name ?? "").trim(),
     employment_type: employmentType,
     skills: asStringList(body.skills),
     salary_range: String(body.salary_range ?? "").trim(),
