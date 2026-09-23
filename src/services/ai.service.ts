@@ -3,7 +3,7 @@ declare const require: (moduleName: string) => any;
 const { GoogleGenAI } = require("@google/genai");
 
 const GEMINI_API_KEY = String(process.env.GEMINI_API_KEY ?? "").trim();
-const GEMINI_MODEL = String(process.env.GEMINI_MODEL ?? "").trim() || "gemini-2.0-flash";
+const GEMINI_MODEL = String(process.env.GEMINI_MODEL ?? "").trim() || "gemini-3.6-flash";
 
 if (!GEMINI_API_KEY) {
   throw new Error("GEMINI_API_KEY is missing. Add it to backend/.env");
