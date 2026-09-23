@@ -65,9 +65,12 @@ type JobRow = Record<string, unknown> & { id?: string; skills?: unknown; status?
 function normalizeJobRecord(row: JobRow | null | undefined) {
   if (!row) return row;
   const jobType = String(row.job_type ?? "");
+  const rawCompany = String(row.company_name ?? "").trim();
+  // Strip the old "Company" placeholder that was baked in by the previous default
+  const company_name = rawCompany === "Company" ? "" : rawCompany;
   return {
     ...row,
-    company_name: String(row.company_name ?? ""),
+    company_name,
     skills: asStringList(row.skills),
     salary_range: String(row.salary_range ?? ""),
     employment_type: String(row.employment_type || EMPLOYMENT_FROM_JOB_TYPE[jobType] || "Full-time"),
