@@ -11,7 +11,8 @@ router.post("/career-advice", async (req: Request, res: Response) => {
     res.json({ success: true, result });
   } catch (error) {
     console.error(error);
-    res.status(500).json({ success: false, message: "AI service failed" });
+    const msg = error instanceof Error ? error.message : String(error ?? "AI service failed");
+    res.status(500).json({ success: false, message: msg });
   }
 });
 
@@ -21,7 +22,8 @@ router.post("/resume-optimize", async (req: Request, res: Response) => {
     res.json({ success: true, result });
   } catch (error) {
     console.error(error);
-    res.status(500).json({ success: false, message: "AI service failed" });
+    const msg = error instanceof Error ? error.message : String(error ?? "AI service failed");
+    res.status(500).json({ success: false, message: msg });
   }
 });
 
@@ -31,7 +33,8 @@ router.post("/interview-question", async (req: Request, res: Response) => {
     res.json({ success: true, result });
   } catch (error) {
     console.error(error);
-    res.status(500).json({ success: false, message: "AI service failed" });
+    const msg = error instanceof Error ? error.message : String(error ?? "AI service failed");
+    res.status(500).json({ success: false, message: msg });
   }
 });
 
@@ -41,7 +44,8 @@ router.post("/interview-evaluate", async (req: Request, res: Response) => {
     res.json({ success: true, result });
   } catch (error) {
     console.error(error);
-    res.status(500).json({ success: false, message: "AI service failed" });
+    const msg = error instanceof Error ? error.message : String(error ?? "AI service failed");
+    res.status(500).json({ success: false, message: msg });
   }
 });
 
@@ -62,7 +66,8 @@ router.post("/generate-content", async (req: Request, res: Response) => {
     res.json({ success: true, result });
   } catch (error) {
     console.error(error);
-    res.status(500).json({ success: false, message: "AI service failed" });
+    const msg = error instanceof Error ? error.message : String(error ?? "AI service failed");
+    res.status(500).json({ success: false, message: msg });
   }
 });
 
@@ -77,7 +82,8 @@ router.post("/job-description", async (req: Request, res: Response) => {
     res.json({ success: true, result });
   } catch (error) {
     console.error(error);
-    res.status(500).json({ success: false, message: "AI service failed" });
+    const msg = error instanceof Error ? error.message : String(error ?? "AI service failed");
+    res.status(500).json({ success: false, message: msg });
   }
 });
 
@@ -97,7 +103,8 @@ router.post("/job-skills", async (req: Request, res: Response) => {
     res.json({ success: true, skills });
   } catch (error) {
     console.error(error);
-    res.status(500).json({ success: false, message: "AI service failed" });
+    const msg = error instanceof Error ? error.message : String(error ?? "AI service failed");
+    res.status(500).json({ success: false, message: msg });
   }
 });
 
@@ -240,7 +247,8 @@ router.post("/candidate-skills", async (req: Request, res: Response) => {
     res.json({ success: true, skills });
   } catch (error) {
     console.error(error);
-    res.status(500).json({ success: false, message: "AI service failed" });
+    const msg = error instanceof Error ? error.message : String(error ?? "AI service failed");
+    res.status(500).json({ success: false, message: msg });
   }
 });
 
@@ -255,7 +263,8 @@ router.post("/assistant", async (req: Request, res: Response) => {
     res.json({ success: true, result });
   } catch (error) {
     console.error(error);
-    res.status(500).json({ success: false, message: "AI service failed" });
+    const msg = error instanceof Error ? error.message : String(error ?? "AI service failed");
+    res.status(500).json({ success: false, message: msg });
   }
 });
 
@@ -275,7 +284,8 @@ router.post("/match-candidates", async (req: Request, res: Response) => {
     res.json({ success: true, result });
   } catch (error) {
     console.error(error);
-    res.status(500).json({ success: false, message: "AI service failed" });
+    const msg = error instanceof Error ? error.message : String(error ?? "AI service failed");
+    res.status(500).json({ success: false, message: msg });
   }
 });
 
