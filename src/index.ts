@@ -18,23 +18,34 @@ if (missingEnv.length) {
   throw new Error(`Missing required env: ${missingEnv.join(", ")}. Set them in backend/.env locally, or in the host dashboard (Render Environment) for production.`);
 }
 
-function corsOrigins() {
+// Exact origins from env vars (comma-separated FRONTEND_URL / FRONTEND_URLS).
+function listedOrigins(): string[] {
   const raw = [process.env.FRONTEND_URL, process.env.FRONTEND_URLS]
     .filter(Boolean)
     .join(",");
-  const listed = raw
+  return raw
     .split(",")
-    .map((value) => value.trim().replace(/\/$/, ""))
+    .map((v) => v.trim().replace(/\/$/, ""))
     .filter(Boolean);
-  if (!listed.length) {
-    // Default: allow local dev + the live Cloudflare Pages deployments
-    return [
-      "http://localhost:5173",
-      "https://career-os.pages.dev",
-      "https://career-os-front.pages.dev",
-    ];
-  }
-  return listed;
+}
+
+// Returns true when the request origin is allowed.
+function isOriginAllowed(origin: string): boolean {
+  const normalized = origin.replace(/\/$/, "");
+
+  // 1. Explicit list from env vars takes priority.
+  const listed = listedOrigins();
+  if (listed.length && listed.includes(normalized)) return true;
+
+  // 2. Always allow local dev.
+  if (normalized === "http://localhost:5173") return true;
+  if (normalized === "http://localhost:5174") return true;
+
+  // 3. Allow any Cloudflare Pages subdomain for this project
+  //    (covers production + all preview deployments).
+  if (/^https:\/\/([a-z0-9-]+\.)?career-os(-front)?\.pages\.dev$/.test(normalized)) return true;
+
+  return false;
 }
 
 // These modules read environment variables during initialization, so load them
@@ -54,14 +65,11 @@ const hiringRouter: express.Router = require("./routes/hiring");
 
 const app = express();
 
-const allowedOrigins = corsOrigins();
-
 app.use(
   cors({
     origin(origin, callback) {
       if (!origin) return callback(null, true);
-      const normalized = origin.replace(/\/$/, "");
-      if (allowedOrigins.includes(normalized)) return callback(null, true);
+      if (isOriginAllowed(origin)) return callback(null, true);
       return callback(null, false);
     },
     credentials: true,
