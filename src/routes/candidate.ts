@@ -30,6 +30,69 @@ async function requireCandidate(req: express.Request, res: express.Response) {
   return { user, client: createAuthenticatedClient(token) };
 }
 
+// ── Dashboard (MUST be before /:id routes — "dashboard" would otherwise match :id) ──
+router.get("/dashboard", async (req, res) => {
+  const authorization = req.header("Authorization");
+  const token = authorization?.startsWith("Bearer ") ? authorization.slice(7) : undefined;
+  if (!token) return res.status(401).json({ success: false, message: "Authentication required" });
+
+  const currentUser = await getUserFromToken(token);
+  if (!currentUser) return res.status(401).json({ success: false, message: "Authentication required" });
+
+  const client = createAuthenticatedClient(token);
+  const userId = currentUser.id;
+
+  try {
+    const [enrollRes, appRes, jobRes, profileRes] = await Promise.all([
+      client.from("enrollments").select("id, progress, courses(title, level)").eq("candidate_id", userId),
+      client.from("applications").select("id, status").eq("candidate_id", userId),
+      client.from("jobs").select("id").in("status", ["open", "published"]),
+      client.from("candidate_profiles").select("full_name, skills, resume_url").eq("id", userId).maybeSingle(),
+    ]);
+
+    const enrollments = enrollRes.data ?? [];
+    const applications = appRes.data ?? [];
+    const jobs = jobRes.data ?? [];
+    const profile = profileRes.data;
+
+    let strength = 30;
+    if (profile?.full_name) strength += 20;
+    if (profile?.skills?.length > 0) strength += 20;
+    if (profile?.resume_url) strength += 15;
+    if (enrollments.length > 0) strength += 10;
+    if (applications.length > 0) strength += 5;
+
+    const learningProgress = enrollments
+      .filter((e: any) => (e.progress ?? 0) < 100)
+      .slice(0, 3)
+      .map((e: any) => ({
+        course: e.courses?.title ?? "Course",
+        level: e.courses?.level ?? "",
+        progress: e.progress ?? 0,
+      }));
+
+    return res.json({
+      success: true,
+      data: {
+        profileStrength: Math.min(100, strength),
+        courses: {
+          total: enrollments.length,
+          inProgress: enrollments.filter((e: any) => (e.progress ?? 0) > 0 && (e.progress ?? 0) < 100).length,
+        },
+        applications: {
+          total: applications.length,
+          interviews: applications.filter((a: any) => a.status === "interview" || a.status === "shortlisted").length,
+        },
+        jobMatches: jobs.length,
+        learningProgress,
+      },
+    });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ success: false, message: "Unable to load candidate dashboard" });
+  }
+});
+
 router.get("/:id/profile", async (req, res) => {
   const auth = await requireCandidate(req, res);
   if (!auth) return;
@@ -241,69 +304,6 @@ router.get("/:id/applications", async (req, res) => {
 
   if (error) return res.status(500).json({ success: false, message: error.message });
   return res.json({ success: true, applications: data });
-});
-
-router.get("/dashboard", async (req, res) => {
-  const authorization = req.header("Authorization");
-  const token = authorization?.startsWith("Bearer ") ? authorization.slice(7) : undefined;
-  if (!token) return res.status(401).json({ success: false, message: "Authentication required" });
-
-  const currentUser = await getUserFromToken(token);
-  if (!currentUser) return res.status(401).json({ success: false, message: "Authentication required" });
-
-  const client = createAuthenticatedClient(token);
-  const userId = currentUser.id;
-
-  try {
-    const [enrollRes, appRes, jobRes, profileRes] = await Promise.all([
-      client.from("enrollments").select("id, progress, courses(title, level)").eq("candidate_id", userId),
-      client.from("applications").select("id, status").eq("candidate_id", userId),
-      client.from("jobs").select("id").in("status", ["open", "published"]),
-      client.from("candidate_profiles").select("full_name, skills, resume_url").eq("id", userId).maybeSingle(),
-    ]);
-
-    const enrollments = enrollRes.data ?? [];
-    const applications = appRes.data ?? [];
-    const jobs = jobRes.data ?? [];
-    const profile = profileRes.data;
-
-    // Calculate profile strength
-    let strength = 30;
-    if (profile?.full_name) strength += 20;
-    if (profile?.skills?.length > 0) strength += 20;
-    if (profile?.resume_url) strength += 15;
-    if (enrollments.length > 0) strength += 10;
-    if (applications.length > 0) strength += 5;
-
-    const learningProgress = enrollments
-      .filter((e: any) => (e.progress ?? 0) < 100)
-      .slice(0, 3)
-      .map((e: any) => ({
-        course: e.courses?.title ?? "Course",
-        level: e.courses?.level ?? "",
-        progress: e.progress ?? 0,
-      }));
-
-    return res.json({
-      success: true,
-      data: {
-        profileStrength: Math.min(100, strength),
-        courses: {
-          total: enrollments.length,
-          inProgress: enrollments.filter((e: any) => (e.progress ?? 0) > 0 && (e.progress ?? 0) < 100).length,
-        },
-        applications: {
-          total: applications.length,
-          interviews: applications.filter((a: any) => a.status === "interview" || a.status === "shortlisted").length,
-        },
-        jobMatches: jobs.length,
-        learningProgress,
-      },
-    });
-  } catch (error) {
-    console.error(error);
-    return res.status(500).json({ success: false, message: "Unable to load candidate dashboard" });
-  }
 });
 
 // ── Saved jobs ──────────────────────────────────────────────────────────────
