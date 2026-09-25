@@ -5,8 +5,10 @@ type Bucket = { count: number; resetAt: number };
 const buckets = new Map<string, Bucket>();
 
 function clientKey(req: Request) {
-  const forwarded = String(req.headers["x-forwarded-for"] ?? "").split(",")[0]?.trim();
-  return forwarded || req.ip || req.socket.remoteAddress || "unknown";
+  // When app.set('trust proxy', 1) is configured, Express populates req.ip
+  // with the real client IP after stripping/validating X-Forwarded-For.
+  // Prefer req.ip so the rate limiter cannot be bypassed by spoofing the header.
+  return req.ip || req.socket.remoteAddress || "unknown";
 }
 
 export function rateLimit(options: { windowMs: number; max: number; prefix: string }) {

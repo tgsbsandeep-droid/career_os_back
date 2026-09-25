@@ -215,11 +215,9 @@ router.get("/interviews", async (req: Request, res: Response) => {
   const result = await auth.client.from("interviews").select("*").eq("recruiter_id", auth.user.id).order("scheduled_at", { ascending: true });
   if (result.error && isMissingRelation(result.error.message)) return res.json({ success: true, interviews: [] });
   if (result.error) return res.status(500).json({ success: false, message: result.error.message });
-  const owned: InterviewRow[] = [];
-  for (const row of (result.data ?? []) as InterviewRow[]) {
-    if (await ownsJob(auth.client, row.job_id, auth.user.id)) owned.push(row);
-  }
-  return res.json({ success: true, interviews: await decorateInterviews(auth.client, owned) });
+  // The query already filters on recruiter_id — no per-row ownsJob() re-check needed.
+  const rows = (result.data ?? []) as InterviewRow[];
+  return res.json({ success: true, interviews: await decorateInterviews(auth.client, rows) });
 });
 
 router.post("/interviews", async (req: Request, res: Response) => {
@@ -312,11 +310,9 @@ router.get("/offers", async (req: Request, res: Response) => {
   const result = await auth.client.from("offers").select("*").eq("recruiter_id", auth.user.id).order("created_at", { ascending: false });
   if (result.error && isMissingRelation(result.error.message)) return res.json({ success: true, offers: [] });
   if (result.error) return res.status(500).json({ success: false, message: result.error.message });
-  const owned: OfferRow[] = [];
-  for (const row of (result.data ?? []) as OfferRow[]) {
-    if (await ownsJob(auth.client, row.job_id, auth.user.id)) owned.push(row);
-  }
-  return res.json({ success: true, offers: await decorateOffers(auth.client, owned) });
+  // The query already filters on recruiter_id — no per-row ownsJob() re-check needed.
+  const rows = (result.data ?? []) as OfferRow[];
+  return res.json({ success: true, offers: await decorateOffers(auth.client, rows) });
 });
 
 router.post("/offers", async (req: Request, res: Response) => {

@@ -1,57 +1,114 @@
 import express = require("express");
 import type { Request, Response } from "express";
+import { safeErrorMessage } from "../lib/apiError";
 const { generateCareerAdvice, optimizeResume, generateInterviewQuestion, evaluateInterviewAnswer, generateTeachingContent, generateJobDescription, suggestJobSkills, suggestCandidateSkills, matchCandidateToJob, chatWithAssistant } = require("../services/ai.service");
 const { createAuthenticatedClient, getUserFromToken } = require("../lib/supabase");
 
 const router = express.Router();
 
+// ---------------------------------------------------------------------------
+// Auth guard — all AI endpoints require a valid session token to prevent
+// unauthenticated abuse of the Gemini API (billing / DoS risk).
+// ---------------------------------------------------------------------------
+async function requireAuth(req: Request, res: Response): Promise<{ id: string } | null> {
+  const authorization = req.header("Authorization");
+  const token = authorization?.startsWith("Bearer ") ? authorization.slice(7) : undefined;
+  if (!token) {
+    res.status(401).json({ success: false, message: "Authentication required" });
+    return null;
+  }
+  const user = await getUserFromToken(token);
+  if (!user) {
+    res.status(401).json({ success: false, message: "Authentication required" });
+    return null;
+  }
+  return user as { id: string };
+}
+
+// Truncate a string field to a safe maximum length before passing to AI.
+function trunc(value: unknown, max: number): string {
+  return String(value ?? "").trim().slice(0, max);
+}
+
 router.post("/career-advice", async (req: Request, res: Response) => {
+  if (!await requireAuth(req, res)) return;
   try {
-    const result = await generateCareerAdvice(req.body);
+    const body = req.body ?? {};
+    const sanitized = {
+      current_role:    trunc(body.current_role, 120),
+      target_role:     trunc(body.target_role, 120),
+      skills:          Array.isArray(body.skills) ? body.skills.slice(0, 40).map((s: unknown) => trunc(s, 80)) : [],
+      experience_years: Number(body.experience_years ?? 0),
+      education:       trunc(body.education, 200),
+      goals:           trunc(body.goals, 500),
+    };
+    const result = await generateCareerAdvice(sanitized);
     res.json({ success: true, result });
   } catch (error) {
     console.error(error);
-    const msg = error instanceof Error ? error.message : String(error ?? "AI service failed");
-    res.status(500).json({ success: false, message: msg });
+    res.status(500).json({ success: false, message: safeErrorMessage(error, "AI service failed") });
   }
 });
 
 router.post("/resume-optimize", async (req: Request, res: Response) => {
+  if (!await requireAuth(req, res)) return;
   try {
-    const result = await optimizeResume(req.body);
+    const body = req.body ?? {};
+    const sanitized = {
+      resumeText:  trunc(body.resumeText, 8000),
+      targetRole:  trunc(body.targetRole, 120),
+      jobDescription: trunc(body.jobDescription, 3000),
+    };
+    const result = await optimizeResume(sanitized);
     res.json({ success: true, result });
   } catch (error) {
     console.error(error);
-    const msg = error instanceof Error ? error.message : String(error ?? "AI service failed");
-    res.status(500).json({ success: false, message: msg });
+    res.status(500).json({ success: false, message: safeErrorMessage(error, "AI service failed") });
   }
 });
 
 router.post("/interview-question", async (req: Request, res: Response) => {
+  if (!await requireAuth(req, res)) return;
   try {
-    const result = await generateInterviewQuestion(req.body);
+    const body = req.body ?? {};
+    const sanitized = {
+      role:       trunc(body.role, 120),
+      level:      trunc(body.level, 60),
+      topic:      trunc(body.topic, 200),
+      previousQuestions: Array.isArray(body.previousQuestions)
+        ? body.previousQuestions.slice(0, 20).map((q: unknown) => trunc(q, 300))
+        : [],
+    };
+    const result = await generateInterviewQuestion(sanitized);
     res.json({ success: true, result });
   } catch (error) {
     console.error(error);
-    const msg = error instanceof Error ? error.message : String(error ?? "AI service failed");
-    res.status(500).json({ success: false, message: msg });
+    res.status(500).json({ success: false, message: safeErrorMessage(error, "AI service failed") });
   }
 });
 
 router.post("/interview-evaluate", async (req: Request, res: Response) => {
+  if (!await requireAuth(req, res)) return;
   try {
-    const result = await evaluateInterviewAnswer(req.body);
+    const body = req.body ?? {};
+    const sanitized = {
+      question: trunc(body.question, 500),
+      answer:   trunc(body.answer, 4000),
+      role:     trunc(body.role, 120),
+      level:    trunc(body.level, 60),
+    };
+    const result = await evaluateInterviewAnswer(sanitized);
     res.json({ success: true, result });
   } catch (error) {
     console.error(error);
-    const msg = error instanceof Error ? error.message : String(error ?? "AI service failed");
-    res.status(500).json({ success: false, message: msg });
+    res.status(500).json({ success: false, message: safeErrorMessage(error, "AI service failed") });
   }
 });
 
 router.post("/generate-content", async (req: Request, res: Response) => {
+  if (!await requireAuth(req, res)) return;
   try {
-    const topic = String(req.body?.topic || "").trim();
+    const topic = trunc(req.body?.topic, 300);
     const contentType = req.body?.contentType;
     if (!topic) {
       res.status(400).json({ success: false, message: "Topic is required" });
@@ -66,45 +123,55 @@ router.post("/generate-content", async (req: Request, res: Response) => {
     res.json({ success: true, result });
   } catch (error) {
     console.error(error);
-    const msg = error instanceof Error ? error.message : String(error ?? "AI service failed");
-    res.status(500).json({ success: false, message: msg });
+    res.status(500).json({ success: false, message: safeErrorMessage(error, "AI service failed") });
   }
 });
 
 router.post("/job-description", async (req: Request, res: Response) => {
+  if (!await requireAuth(req, res)) return;
   try {
-    const title = String(req.body?.title || "").trim();
+    const body = req.body ?? {};
+    const title = trunc(body.title, 120);
     if (!title) {
       res.status(400).json({ success: false, message: "Job title is required" });
       return;
     }
-    const result = await generateJobDescription(req.body);
+    const sanitized = {
+      title,
+      company:          trunc(body.company, 120),
+      location:         trunc(body.location, 120),
+      employment_type:  trunc(body.employment_type, 60),
+      experience_level: trunc(body.experience_level, 60),
+      skills:           Array.isArray(body.skills) ? body.skills.slice(0, 30).map((s: unknown) => trunc(s, 80)) : [],
+      description:      trunc(body.description, 2000),
+    };
+    const result = await generateJobDescription(sanitized);
     res.json({ success: true, result });
   } catch (error) {
     console.error(error);
-    const msg = error instanceof Error ? error.message : String(error ?? "AI service failed");
-    res.status(500).json({ success: false, message: msg });
+    res.status(500).json({ success: false, message: safeErrorMessage(error, "AI service failed") });
   }
 });
 
 router.post("/job-skills", async (req: Request, res: Response) => {
+  if (!await requireAuth(req, res)) return;
   try {
-    const title = String(req.body?.title || "").trim();
+    const body = req.body ?? {};
+    const title = trunc(body.title, 120);
     if (!title) {
       res.status(400).json({ success: false, message: "Job title is required" });
       return;
     }
     const skills = await suggestJobSkills({
       title,
-      description: req.body?.description,
-      experience_level: req.body?.experience_level,
-      employment_type: req.body?.employment_type,
+      description:      trunc(body.description, 2000),
+      experience_level: trunc(body.experience_level, 60),
+      employment_type:  trunc(body.employment_type, 60),
     });
     res.json({ success: true, skills });
   } catch (error) {
     console.error(error);
-    const msg = error instanceof Error ? error.message : String(error ?? "AI service failed");
-    res.status(500).json({ success: false, message: msg });
+    res.status(500).json({ success: false, message: safeErrorMessage(error, "AI service failed") });
   }
 });
 
@@ -247,31 +314,38 @@ router.post("/candidate-skills", async (req: Request, res: Response) => {
     res.json({ success: true, skills });
   } catch (error) {
     console.error(error);
-    const msg = error instanceof Error ? error.message : String(error ?? "AI service failed");
-    res.status(500).json({ success: false, message: msg });
+    res.status(500).json({ success: false, message: safeErrorMessage(error, "AI service failed") });
   }
 });
 
 router.post("/assistant", async (req: Request, res: Response) => {
+  if (!await requireAuth(req, res)) return;
   try {
-    const message = String(req.body?.message || "").trim();
+    const body = req.body ?? {};
+    const message = trunc(body.message, 2000);
     if (!message) {
       res.status(400).json({ success: false, message: "Message is required" });
       return;
     }
-    const result = await chatWithAssistant(req.body);
+    const sanitized = {
+      message,
+      context: trunc(body.context, 1000),
+      role:    trunc(body.role, 120),
+    };
+    const result = await chatWithAssistant(sanitized);
     res.json({ success: true, result });
   } catch (error) {
     console.error(error);
-    const msg = error instanceof Error ? error.message : String(error ?? "AI service failed");
-    res.status(500).json({ success: false, message: msg });
+    res.status(500).json({ success: false, message: safeErrorMessage(error, "AI service failed") });
   }
 });
 
 router.post("/match-candidates", async (req: Request, res: Response) => {
+  if (!await requireAuth(req, res)) return;
   try {
-    const title = String(req.body?.job?.title || "").trim();
-    const candidates = Array.isArray(req.body?.candidates) ? req.body.candidates : [];
+    const body = req.body ?? {};
+    const title = trunc(body.job?.title, 120);
+    const candidates = Array.isArray(body.candidates) ? body.candidates.slice(0, 50) : [];
     if (!title) {
       res.status(400).json({ success: false, message: "Job title is required" });
       return;
@@ -280,12 +354,11 @@ router.post("/match-candidates", async (req: Request, res: Response) => {
       res.status(400).json({ success: false, message: "At least one candidate is required" });
       return;
     }
-    const result = await matchCandidateToJob({ job: req.body.job, candidates });
+    const result = await matchCandidateToJob({ job: body.job, candidates });
     res.json({ success: true, result });
   } catch (error) {
     console.error(error);
-    const msg = error instanceof Error ? error.message : String(error ?? "AI service failed");
-    res.status(500).json({ success: false, message: msg });
+    res.status(500).json({ success: false, message: safeErrorMessage(error, "AI service failed") });
   }
 });
 

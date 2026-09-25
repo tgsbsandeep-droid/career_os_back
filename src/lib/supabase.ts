@@ -10,16 +10,14 @@ const ROLE_ALIASES: Record<string, string> = {
 };
 
 function collectRoles(user: { user_metadata?: Record<string, unknown>; app_metadata?: Record<string, unknown> } | null | undefined) {
-  const meta = user?.user_metadata ?? {};
+  // Only trust app_metadata (admin-controlled, not writable by the client).
+  // user_metadata is user-editable via supabase.auth.updateUser() and must
+  // not be used for role gating. The authoritative check is verifyRoleFromDb();
+  // collectRoles/hasAnyRole is only used as a local-dev fallback.
   const app = user?.app_metadata ?? {};
   const appRoles = [
     ...(Array.isArray(app.roles) ? app.roles : []),
     app.role,
-  ];
-  const userRoles = [
-    ...(Array.isArray(meta.roles) ? meta.roles : []),
-    meta.role,
-    meta.active_role,
   ];
   const seen = new Set<string>();
   for (const raw of appRoles) {
@@ -27,15 +25,6 @@ function collectRoles(user: { user_metadata?: Record<string, unknown>; app_metad
     if (!value) continue;
     seen.add(value);
     seen.add(ROLE_ALIASES[value] ?? value);
-  }
-  const adminFromApp = seen.has("admin");
-  for (const raw of userRoles) {
-    const value = String(raw ?? "").trim().toLowerCase();
-    if (!value) continue;
-    const mapped = ROLE_ALIASES[value] ?? value;
-    if ((value === "admin" || mapped === "admin") && !adminFromApp) continue;
-    seen.add(value);
-    seen.add(mapped);
   }
   return seen;
 }
@@ -53,23 +42,87 @@ function hasAnyRole(
 
 const supabaseUrl = process.env.SUPABASE_URL!;
 const supabaseKey = process.env.SUPABASE_PUBLISHABLE_KEY!;
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 const supabase = createClient(supabaseUrl, supabaseKey);
 
+// Service-role client — bypasses RLS, server-side only, never exposed to clients.
+const supabaseAdmin = supabaseServiceKey
+  ? createClient(supabaseUrl, supabaseServiceKey, { auth: { persistSession: false } })
+  : null;
+
+const PROFILE_ROLE_ALIASES: Record<string, string> = {
+  tutor: "academy",
+  instructor: "academy",
+  training_institute: "candidate",
+  college: "candidate",
+  student: "candidate",
+  employer: "recruiter",
+};
+
 /**
- * Decode a JWT payload without verifying the signature.
- * Used to extract the user ID from a Supabase access token when the remote
- * auth server rejects the token due to clock skew ("JWT issued at future").
+ * Verify a user's role against the server-side `profiles` table.
+ * This is the authoritative check — it cannot be spoofed by writing to
+ * user_metadata from the client. Falls back to JWT metadata only when the
+ * service-role key is not configured (e.g. local dev without the key).
  */
-function decodeJwtPayload(token: string): Record<string, any> | null {
+async function verifyRoleFromDb(
+  userId: string,
+  allowed: string[],
+): Promise<boolean> {
+  if (!supabaseAdmin) return false;
+  const { data, error } = await supabaseAdmin
+    .from("profiles")
+    .select("role, roles")
+    .eq("id", userId)
+    .maybeSingle();
+  if (error || !data) return false;
+  const normalizedAllowed = new Set(
+    allowed.map((r) => {
+      const v = r.trim().toLowerCase();
+      return PROFILE_ROLE_ALIASES[v] ?? v;
+    }),
+  );
+  const profileRoles: string[] = [
+    ...(Array.isArray(data.roles) ? data.roles : []),
+    data.role,
+  ]
+    .map((r) => {
+      const v = String(r ?? "").trim().toLowerCase();
+      return PROFILE_ROLE_ALIASES[v] ?? v;
+    })
+    .filter(Boolean);
+  return profileRoles.some((r) => normalizedAllowed.has(r));
+}
+
+/**
+ * Verify a Supabase JWT locally using SUPABASE_JWT_SECRET (HS256).
+ * Returns the decoded payload on success, null on any failure.
+ * Used only as a clock-skew fallback — the signature IS checked here.
+ */
+async function verifyJwtLocally(token: string): Promise<Record<string, any> | null> {
+  const secret = process.env.SUPABASE_JWT_SECRET;
+  if (!secret) return null; // No secret configured — fail closed.
   try {
     const parts = token.split(".");
     if (parts.length !== 3) return null;
-    // Base64url → Base64 → JSON
-    const rawPayload = parts[1] ?? "";
-    const base64 = rawPayload.replace(/-/g, "+").replace(/_/g, "/");
-    const json = Buffer.from(base64, "base64").toString("utf8");
-    return JSON.parse(json);
+    const [headerB64, payloadB64, sigB64] = parts as [string, string, string];
+
+    // Import the HMAC-SHA256 key.
+    const keyData = new TextEncoder().encode(secret);
+    const cryptoKey = await crypto.subtle.importKey(
+      "raw", keyData, { name: "HMAC", hash: "SHA-256" }, false, ["verify"],
+    );
+
+    // Verify the signature over "header.payload".
+    const signingInput = new TextEncoder().encode(`${headerB64}.${payloadB64}`);
+    const sigBytes = Buffer.from(sigB64.replace(/-/g, "+").replace(/_/g, "/"), "base64");
+    const valid = await crypto.subtle.verify("HMAC", cryptoKey, sigBytes, signingInput);
+    if (!valid) return null;
+
+    // Signature is valid — decode the payload.
+    const json = Buffer.from(payloadB64.replace(/-/g, "+").replace(/_/g, "/"), "base64").toString("utf8");
+    return JSON.parse(json) as Record<string, any>;
   } catch {
     return null;
   }
@@ -77,22 +130,19 @@ function decodeJwtPayload(token: string): Record<string, any> | null {
 
 /**
  * Get the Supabase user from an access token.
- * Falls back to local JWT decoding when the remote auth server rejects the
- * token with a clock-skew error ("JWT issued at future").
+ * Falls back to local JWT verification (signature-checked via SUPABASE_JWT_SECRET)
+ * when the remote auth server rejects the token with a clock-skew error.
+ * If SUPABASE_JWT_SECRET is not set the fallback is disabled (fail-closed).
  */
 async function getUserFromToken(token: string) {
   const { data, error } = await supabase.auth.getUser(token);
   if (!error) return data.user;
 
-  // If Supabase rejects the token due to clock skew, decode it locally so
-  // the app keeps working. The token's signature is still validated by
-  // Supabase's RLS when the authenticated client makes DB queries.
-  // Do not treat every JWT error (expired, malformed, revoked) as skew.
+  // Only attempt the fallback for clock-skew errors, not for expired/revoked tokens.
   const message = error.message?.toLowerCase() ?? "";
   if (message.includes("issued at future") || message.includes("iat is in the future")) {
-    const payload = decodeJwtPayload(token);
+    const payload = await verifyJwtLocally(token);
     if (payload?.sub) {
-      // Return a minimal user-like object with the fields the routes need.
       return {
         id: payload.sub as string,
         email: payload.email as string | undefined,
@@ -115,4 +165,4 @@ function createAuthenticatedClient(accessToken: string) {
   });
 }
 
-module.exports = { supabase, createAuthenticatedClient, getUserFromToken, hasAnyRole, collectRoles };
+module.exports = { supabase, createAuthenticatedClient, getUserFromToken, hasAnyRole, collectRoles, verifyRoleFromDb };

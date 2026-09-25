@@ -65,6 +65,11 @@ const hiringRouter: express.Router = require("./routes/hiring");
 
 const app = express();
 
+// Trust the first proxy hop (Render's load balancer / Cloudflare).
+// This makes Express overwrite X-Forwarded-For with the real client IP
+// so the rate limiter cannot be bypassed by spoofing that header.
+app.set("trust proxy", 1);
+
 app.use(
   cors({
     origin(origin, callback) {
