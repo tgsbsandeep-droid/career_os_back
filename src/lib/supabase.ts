@@ -1,44 +1,5 @@
 const { createClient } = require("@supabase/supabase-js");
-
-const ROLE_ALIASES: Record<string, string> = {
-  tutor: "academy",
-  instructor: "academy",
-  training_institute: "candidate",
-  college: "candidate",
-  student: "candidate",
-  employer: "recruiter",
-};
-
-function collectRoles(user: { user_metadata?: Record<string, unknown>; app_metadata?: Record<string, unknown> } | null | undefined) {
-  // Only trust app_metadata (admin-controlled, not writable by the client).
-  // user_metadata is user-editable via supabase.auth.updateUser() and must
-  // not be used for role gating. The authoritative check is verifyRoleFromDb();
-  // collectRoles/hasAnyRole is only used as a local-dev fallback.
-  const app = user?.app_metadata ?? {};
-  const appRoles = [
-    ...(Array.isArray(app.roles) ? app.roles : []),
-    app.role,
-  ];
-  const seen = new Set<string>();
-  for (const raw of appRoles) {
-    const value = String(raw ?? "").trim().toLowerCase();
-    if (!value) continue;
-    seen.add(value);
-    seen.add(ROLE_ALIASES[value] ?? value);
-  }
-  return seen;
-}
-
-function hasAnyRole(
-  user: { user_metadata?: Record<string, unknown>; app_metadata?: Record<string, unknown> } | null | undefined,
-  allowed: string[],
-) {
-  const roles = collectRoles(user);
-  return allowed.some((role) => {
-    const value = String(role).trim().toLowerCase();
-    return roles.has(value) || roles.has(ROLE_ALIASES[value] ?? value);
-  });
-}
+const { collectRoles, hasAnyRole } = require("./roles");
 
 const supabaseUrl = process.env.SUPABASE_URL!;
 const supabaseKey = process.env.SUPABASE_PUBLISHABLE_KEY!;
@@ -70,13 +31,26 @@ async function verifyRoleFromDb(
   userId: string,
   allowed: string[],
 ): Promise<boolean> {
+  // When the service-role key is absent (local dev or misconfigured deployment)
+  // we cannot query the profiles table as admin, so we cannot do the authoritative
+  // DB check. Return false here; callers are expected to fall back to hasAnyRole()
+  // against the JWT when supabaseAdmin is unavailable.
   if (!supabaseAdmin) return false;
   const { data, error } = await supabaseAdmin
     .from("profiles")
     .select("role, roles")
     .eq("id", userId)
     .maybeSingle();
-  if (error || !data) return false;
+  // If the profiles row doesn't exist yet (e.g. race between signup and first API
+  // call) treat as not-yet-verified rather than hard-denying.
+  if (error) {
+    console.error(`[verifyRoleFromDb] DB error for user ${userId}:`, error.message);
+    return false;
+  }
+  if (!data) {
+    console.warn(`[verifyRoleFromDb] No profiles row found for user ${userId} — profile may not have been created yet`);
+    return false;
+  }
   const normalizedAllowed = new Set(
     allowed.map((r) => {
       const v = r.trim().toLowerCase();

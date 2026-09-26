@@ -1,6 +1,7 @@
 import express = require("express");
-const { supabase, createAuthenticatedClient, getUserFromToken, hasAnyRole } = require("../lib/supabase");
+const { supabase, createAuthenticatedClient, getUserFromToken } = require("../lib/supabase");
 const { parsePageParams, pageMeta } = require("../lib/pagination");
+import { requireAcademy, requireUser as requireAuthUser, bearerToken } from "../lib/authz";
 
 const router = express.Router();
 
@@ -14,30 +15,13 @@ function createSlug(title: string) {
 }
 
 async function getUser(req: express.Request) {
-  const authorization = req.header("Authorization");
-  const token = authorization?.startsWith("Bearer ") ? authorization.slice(7) : undefined;
+  const token = bearerToken(req);
   if (!token) return null;
   return await getUserFromToken(token);
 }
 
-const ACADEMY_ROLES = ["academy", "tutor", "instructor"];
-
-async function requireTutor(req: express.Request, res: express.Response) {
-  const authorization = req.header("Authorization");
-  const token = authorization?.startsWith("Bearer ") ? authorization.slice(7) : undefined;
-  if (!token) {
-    res.status(401).json({ success: false, message: "Authentication required" });
-    return null;
-  }
-
-  const user = await getUser(req);
-  if (!user || !hasAnyRole(user, ACADEMY_ROLES)) {
-    res.status(403).json({ success: false, message: "Academy access required" });
-    return null;
-  }
-
-  return { user, client: createAuthenticatedClient(token) };
-}
+/** requireTutor delegates to the shared requireAcademy guard (verifyRoleFromDb + app_metadata fallback). */
+const requireTutor = requireAcademy;
 
 // Resolve tutor_profiles.id from auth user UUID. Live schema uses id = auth.users(id);
 // later migrations also add a user_id column.

@@ -1,36 +1,11 @@
 import express = require("express");
-const { createAuthenticatedClient, getUserFromToken, hasAnyRole, verifyRoleFromDb } = require("../lib/supabase");
+const { createAuthenticatedClient } = require("../lib/supabase");
+import { requireRecruiter } from "../lib/authz";
 
 const router = express.Router();
 
 const COMPANY_SIZES = ["startup", "small", "medium", "large", "enterprise"] as const;
 type CompanySize = (typeof COMPANY_SIZES)[number];
-
-async function requireRecruiter(req: express.Request, res: express.Response) {
-  const authorization = req.header("Authorization");
-  const token = authorization?.startsWith("Bearer ") ? authorization.slice(7) : undefined;
-  if (!token) {
-    res.status(401).json({ success: false, message: "Authentication required" });
-    return null;
-  }
-  const user = await getUserFromToken(token);
-  if (!user) {
-    res.status(401).json({ success: false, message: "Authentication required" });
-    return null;
-  }
-  // Authoritative role check: query the server-side profiles table so that
-  // user_metadata tampering (candidate → recruiter escalation) is rejected.
-  const allowed = await verifyRoleFromDb(user.id, ["recruiter", "employer"]);
-  if (!allowed) {
-    // Fall back to JWT metadata only when the service-role key is absent (local dev).
-    if (!process.env.SUPABASE_SERVICE_ROLE_KEY && hasAnyRole(user, ["recruiter", "employer"])) {
-      return { user, client: createAuthenticatedClient(token) };
-    }
-    res.status(403).json({ success: false, message: "Recruiter or employer access required" });
-    return null;
-  }
-  return { user, client: createAuthenticatedClient(token) };
-}
 
 async function findRecruiterProfile(client: ReturnType<typeof createAuthenticatedClient>, userId: string) {
   const byUser = await client.from("recruiter_profiles").select("*").eq("user_id", userId).maybeSingle();

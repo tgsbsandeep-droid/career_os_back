@@ -1,7 +1,8 @@
 import express = require("express");
-const { supabase, createAuthenticatedClient, getUserFromToken, hasAnyRole } = require("../lib/supabase");
+const { supabase, createAuthenticatedClient, getUserFromToken } = require("../lib/supabase");
 const { parsePageParams, pageMeta } = require("../lib/pagination");
 import type { Request, Response } from "express";
+import { requireRecruiter } from "../lib/authz";
 
 const router = express.Router();
 
@@ -18,21 +19,6 @@ type CandidateProfile = {
   resume_url?: string | null;
   avatar_url?: string | null;
 };
-
-async function requireRecruiter(req: Request, res: Response) {
-  const authorization = req.header("Authorization");
-  const token = authorization?.startsWith("Bearer ") ? authorization.slice(7) : undefined;
-  if (!token) {
-    res.status(401).json({ success: false, message: "Authentication required" });
-    return null;
-  }
-  const user = await getUserFromToken(token);
-  if (!user || !hasAnyRole(user, ["recruiter", "employer"])) {
-    res.status(403).json({ success: false, message: "Recruiter or employer access required" });
-    return null;
-  }
-  return { user, client: createAuthenticatedClient(token) };
-}
 
 const EMPLOYMENT_FROM_JOB_TYPE: Record<string, string> = {
   full_time: "Full-time",

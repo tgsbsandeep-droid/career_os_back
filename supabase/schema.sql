@@ -295,7 +295,7 @@ drop policy if exists "Users can manage own profile" on public.profiles;
 create policy "Users can manage own profile" on public.profiles for insert to authenticated with check (auth.uid() = id);
 create policy "Users can update own profile" on public.profiles for update to authenticated using (auth.uid() = id) with check (auth.uid() = id);
 drop policy if exists "Admins can manage all profiles" on public.profiles;
-create policy "Admins can manage all profiles" on public.profiles for all to authenticated using ((auth.jwt() -> 'user_metadata' ->> 'role') = 'admin') with check ((auth.jwt() -> 'user_metadata' ->> 'role') = 'admin');
+create policy "Admins can manage all profiles" on public.profiles for all to authenticated using ((auth.jwt() -> 'app_metadata' ->> 'role') = 'admin' or (auth.jwt() -> 'app_metadata' -> 'roles') ? 'admin') with check ((auth.jwt() -> 'app_metadata' ->> 'role') = 'admin' or (auth.jwt() -> 'app_metadata' -> 'roles') ? 'admin');
 drop policy if exists "Users can view own notifications" on public.notifications;
 create policy "Users can view own notifications" on public.notifications for select to authenticated using (auth.uid() = user_id);
 drop policy if exists "Users can update own notifications" on public.notifications;
@@ -306,7 +306,7 @@ create policy "Anyone can view published courses" on public.courses for select u
 drop policy if exists "Tutors can manage own courses" on public.courses;
 create policy "Tutors can manage own courses" on public.courses for all to authenticated using (auth.uid() = owner_id) with check (auth.uid() = owner_id);
 drop policy if exists "Admins can manage all courses" on public.courses;
-create policy "Admins can manage all courses" on public.courses for all to authenticated using ((auth.jwt() -> 'user_metadata' ->> 'role') = 'admin') with check ((auth.jwt() -> 'user_metadata' ->> 'role') = 'admin');
+create policy "Admins can manage all courses" on public.courses for all to authenticated using ((auth.jwt() -> 'app_metadata' ->> 'role') = 'admin' or (auth.jwt() -> 'app_metadata' -> 'roles') ? 'admin') with check ((auth.jwt() -> 'app_metadata' ->> 'role') = 'admin' or (auth.jwt() -> 'app_metadata' -> 'roles') ? 'admin');
 drop policy if exists "Tutors can manage own profile" on public.tutor_profiles;
 create policy "Tutors can manage own profile" on public.tutor_profiles for all to authenticated using (auth.uid() = id) with check (auth.uid() = id);
 drop policy if exists "Candidates can manage own enrollments" on public.enrollments;
@@ -362,7 +362,7 @@ create policy "Recruiters can manage own jobs" on public.jobs
   using (public.job_owned_by(id, auth.uid()))
   with check (owner_id = auth.uid() or employer_id = auth.uid() or recruiter_id = auth.uid());
 drop policy if exists "Admins can manage all jobs" on public.jobs;
-create policy "Admins can manage all jobs" on public.jobs for all to authenticated using ((auth.jwt() -> 'user_metadata' ->> 'role') = 'admin') with check ((auth.jwt() -> 'user_metadata' ->> 'role') = 'admin');
+create policy "Admins can manage all jobs" on public.jobs for all to authenticated using ((auth.jwt() -> 'app_metadata' ->> 'role') = 'admin' or (auth.jwt() -> 'app_metadata' -> 'roles') ? 'admin') with check ((auth.jwt() -> 'app_metadata' ->> 'role') = 'admin' or (auth.jwt() -> 'app_metadata' -> 'roles') ? 'admin');
 drop policy if exists "Recruiters can manage own profile" on public.recruiter_profiles;
 create policy "Recruiters can manage own profile" on public.recruiter_profiles for all to authenticated using (auth.uid() = id) with check (auth.uid() = id);
 drop policy if exists "Candidates can view own applications" on public.applications;
@@ -374,7 +374,7 @@ create policy "Recruiters can view applicants to own jobs" on public.application
 drop policy if exists "Recruiters can update applicants to own jobs" on public.applications;
 create policy "Recruiters can update applicants to own jobs" on public.applications for update to authenticated using (public.job_owned_by(job_id, auth.uid())) with check (public.job_owned_by(job_id, auth.uid()));
 drop policy if exists "Admins can manage all applications" on public.applications;
-create policy "Admins can manage all applications" on public.applications for all to authenticated using ((auth.jwt() -> 'user_metadata' ->> 'role') = 'admin') with check ((auth.jwt() -> 'user_metadata' ->> 'role') = 'admin');
+create policy "Admins can manage all applications" on public.applications for all to authenticated using ((auth.jwt() -> 'app_metadata' ->> 'role') = 'admin' or (auth.jwt() -> 'app_metadata' -> 'roles') ? 'admin') with check ((auth.jwt() -> 'app_metadata' ->> 'role') = 'admin' or (auth.jwt() -> 'app_metadata' -> 'roles') ? 'admin');
 drop policy if exists "Recruiters can view applicant profiles" on public.candidate_profiles;
 create policy "Recruiters can view applicant profiles" on public.candidate_profiles
   for select to authenticated

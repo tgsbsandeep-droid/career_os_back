@@ -1,7 +1,8 @@
 import express = require("express");
-const { createAuthenticatedClient, getUserFromToken, hasAnyRole } = require("../lib/supabase");
+const { createAuthenticatedClient } = require("../lib/supabase");
 const { sendInterviewInvitation } = require("../lib/mail");
 import type { Request, Response } from "express";
+import { requireUser as sharedRequireUser, requireRecruiter as sharedRequireRecruiter, type AuthContext } from "../lib/authz";
 
 const router = express.Router();
 
@@ -10,7 +11,7 @@ const INTERVIEW_STATUSES = ["scheduled", "completed", "cancelled"] as const;
 const OFFER_STATUSES = ["draft", "sent", "accepted", "declined"] as const;
 const TABLE_UNAVAILABLE = "Interview scheduling and offers are not available yet. Apply the hiring migration (20260911_interviews_offers.sql) in the Supabase SQL Editor, then retry.";
 
-type Auth = { user: { id: string }; client: ReturnType<typeof createAuthenticatedClient> };
+type Auth = AuthContext;
 type ApplicationRow = { id: string; job_id: string; candidate_id: string; status: string };
 type InterviewRow = {
   id: string;
@@ -50,30 +51,8 @@ function missingWrite(res: Response, error: { message?: string } | null) {
   return res.status(500).json({ success: false, message: error?.message ?? "Request failed" });
 }
 
-async function requireUser(req: Request, res: Response) {
-  const authorization = req.header("Authorization");
-  const token = authorization?.startsWith("Bearer ") ? authorization.slice(7) : undefined;
-  if (!token) {
-    res.status(401).json({ success: false, message: "Authentication required" });
-    return null;
-  }
-  const user = await getUserFromToken(token);
-  if (!user) {
-    res.status(401).json({ success: false, message: "Authentication required" });
-    return null;
-  }
-  return { user, client: createAuthenticatedClient(token) } as Auth;
-}
-
-async function requireRecruiter(req: Request, res: Response) {
-  const auth = await requireUser(req, res);
-  if (!auth) return null;
-  if (!hasAnyRole(auth.user, ["recruiter", "employer"])) {
-    res.status(403).json({ success: false, message: "Recruiter or employer access required" });
-    return null;
-  }
-  return auth;
-}
+const requireUser = sharedRequireUser;
+const requireRecruiter = sharedRequireRecruiter;
 
 async function getRecruiterProfileId(client: Auth["client"], userId: string): Promise<string | null> {
   const byUser = await client.from("recruiter_profiles").select("id").eq("user_id", userId).maybeSingle();

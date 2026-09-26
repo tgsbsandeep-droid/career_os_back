@@ -1,38 +1,12 @@
 import express = require("express");
-const { createAuthenticatedClient, getUserFromToken, hasAnyRole, verifyRoleFromDb } = require("../lib/supabase");
+const { createAuthenticatedClient } = require("../lib/supabase");
+import { requireAcademy } from "../lib/authz";
 
 const router = express.Router();
 
-const ACADEMY_ROLES = ["academy", "tutor", "instructor"];
 const TEACHING_MODES = ["online", "offline", "hybrid"] as const;
 
 type TeachingMode = (typeof TEACHING_MODES)[number];
-
-async function requireAcademy(req: express.Request, res: express.Response) {
-  const authorization = req.header("Authorization");
-  const token = authorization?.startsWith("Bearer ") ? authorization.slice(7) : undefined;
-  if (!token) {
-    res.status(401).json({ success: false, message: "Authentication required" });
-    return null;
-  }
-  const user = await getUserFromToken(token);
-  if (!user) {
-    res.status(401).json({ success: false, message: "Authentication required" });
-    return null;
-  }
-  // Authoritative role check: query the server-side profiles table so that
-  // user_metadata tampering (candidate → academy escalation) is rejected.
-  const allowed = await verifyRoleFromDb(user.id, ACADEMY_ROLES);
-  if (!allowed) {
-    // Fall back to JWT metadata only when the service-role key is absent (local dev).
-    if (!process.env.SUPABASE_SERVICE_ROLE_KEY && hasAnyRole(user, ACADEMY_ROLES)) {
-      return { user, client: createAuthenticatedClient(token) };
-    }
-    res.status(403).json({ success: false, message: "Academy access required" });
-    return null;
-  }
-  return { user, client: createAuthenticatedClient(token) };
-}
 
 function asString(value: unknown) {
   return String(value ?? "").trim();

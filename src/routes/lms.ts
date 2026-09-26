@@ -1,47 +1,20 @@
 import express = require("express");
-const { createAuthenticatedClient, getUserFromToken, hasAnyRole } = require("../lib/supabase");
+const { createAuthenticatedClient, getUserFromToken } = require("../lib/supabase");
+import { requireAcademy, requireUser, bearerToken } from "../lib/authz";
 
 const router = express.Router();
-
-const ACADEMY_ROLES = ["academy", "tutor", "instructor"];
 
 type Question = { id: string; text: string; options: string[]; correct: number };
 type QuizRow = { id: string; course_id: string; title: string; questions: Question[]; created_at?: string; updated_at?: string };
 
-function bearer(req: express.Request) {
-  const authorization = req.header("Authorization");
-  return authorization?.startsWith("Bearer ") ? authorization.slice(7) : undefined;
-}
-
 async function getUser(req: express.Request) {
-  const token = bearer(req);
+  const token = bearerToken(req);
   if (!token) return null;
   return await getUserFromToken(token);
 }
 
-async function requireUser(req: express.Request, res: express.Response) {
-  const token = bearer(req);
-  if (!token) {
-    res.status(401).json({ success: false, message: "Authentication required" });
-    return null;
-  }
-  const user = await getUser(req);
-  if (!user) {
-    res.status(401).json({ success: false, message: "Authentication required" });
-    return null;
-  }
-  return { user, client: createAuthenticatedClient(token), token };
-}
-
-async function requireTutor(req: express.Request, res: express.Response) {
-  const auth = await requireUser(req, res);
-  if (!auth) return null;
-  if (!hasAnyRole(auth.user, ACADEMY_ROLES)) {
-    res.status(403).json({ success: false, message: "Academy access required" });
-    return null;
-  }
-  return auth;
-}
+/** requireTutor delegates to the shared requireAcademy guard (verifyRoleFromDb + app_metadata fallback). */
+const requireTutor = requireAcademy;
 
 async function getTutorProfileId(client: ReturnType<typeof createAuthenticatedClient>, userId: string) {
   const byUser = await client.from("tutor_profiles").select("id").eq("user_id", userId).maybeSingle();
