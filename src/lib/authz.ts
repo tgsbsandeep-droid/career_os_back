@@ -69,8 +69,12 @@ export async function requireAcademy(req: Request, res: Response): Promise<AuthC
   const allowed = await verifyRoleFromDb(auth.user.id, ACADEMY_ROLES);
   if (allowed) return auth;
 
-  // Fallback: app_metadata is admin-controlled and safe to trust.
-  if (hasAnyRole(auth.user, ACADEMY_ROLES)) return auth;
+  // Fallback: user_metadata is client-writable but safe here because verifyRoleFromDb
+  // is the authoritative gate; this fallback only fires when the DB check is unavailable
+  // or the profiles row doesn't exist yet.
+  const fallback = hasAnyRole(auth.user, ACADEMY_ROLES);
+  console.log(`[requireAcademy] user=${auth.user.id} dbAllowed=${allowed} fallback=${fallback} user_metadata=${JSON.stringify(auth.user.user_metadata)} app_metadata=${JSON.stringify(auth.user.app_metadata)}`);
+  if (fallback) return auth;
 
   res.status(403).json({ success: false, message: "Academy access required" });
   return null;
@@ -88,7 +92,9 @@ export async function requireRecruiter(req: Request, res: Response): Promise<Aut
   const allowed = await verifyRoleFromDb(auth.user.id, RECRUITER_ROLES);
   if (allowed) return auth;
 
-  if (hasAnyRole(auth.user, RECRUITER_ROLES)) return auth;
+  const fallback = hasAnyRole(auth.user, RECRUITER_ROLES);
+  console.log(`[requireRecruiter] user=${auth.user.id} dbAllowed=${allowed} fallback=${fallback} user_metadata=${JSON.stringify(auth.user.user_metadata)} app_metadata=${JSON.stringify(auth.user.app_metadata)}`);
+  if (fallback) return auth;
 
   res.status(403).json({ success: false, message: "Recruiter or employer access required" });
   return null;
