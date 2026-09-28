@@ -139,4 +139,4 @@ function createAuthenticatedClient(accessToken: string) {
   });
 }
 
-module.exports = { supabase, createAuthenticatedClient, getUserFromToken, hasAnyRole, collectRoles, verifyRoleFromDb };
+module.exports = { supabase, supabaseAdmin, createAuthenticatedClient, getUserFromToken, hasAnyRole, collectRoles, verifyRoleFromDb };

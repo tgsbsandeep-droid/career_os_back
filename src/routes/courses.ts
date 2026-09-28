@@ -1,5 +1,5 @@
 import express = require("express");
-const { supabase, createAuthenticatedClient, getUserFromToken } = require("../lib/supabase");
+const { supabase, supabaseAdmin, createAuthenticatedClient, getUserFromToken } = require("../lib/supabase");
 const { parsePageParams, pageMeta } = require("../lib/pagination");
 import { requireAcademy, requireUser as requireAuthUser, bearerToken } from "../lib/authz";
 
@@ -518,7 +518,7 @@ router.get("/:id/students", async (req, res) => {
   const profileRecords = (profiles ?? []) as CandidateProfileRecord[];
   const profileMap = new Map(profileRecords.map((profile) => [profile.id, profile]));
 
-  // Fall back to auth profiles for candidates whose candidate_profile has no name
+  // Fallback 1: public profiles table (full_name set on signup)
   const missingNameIds = candidateIds.filter((id) => !profileMap.get(id)?.full_name?.trim());
   if (missingNameIds.length) {
     const { data: authProfiles } = await auth.client.from("profiles").select("id, full_name").in("id", missingNameIds);
@@ -526,6 +526,22 @@ router.get("/:id/students", async (req, res) => {
       if (!row?.id || !row.full_name?.trim()) continue;
       const existing = profileMap.get(row.id);
       profileMap.set(row.id, { ...(existing ?? { id: row.id, education: "", skills: [], experience: [], resume_url: null }), full_name: row.full_name });
+    }
+  }
+
+  // Fallback 2: auth.users raw_user_meta_data (Google OAuth / email signup display name)
+  const stillMissingIds = candidateIds.filter((id) => !profileMap.get(id)?.full_name?.trim());
+  if (stillMissingIds.length && supabaseAdmin) {
+    const { data: authUsers } = await supabaseAdmin.auth.admin.listUsers({ perPage: 1000 });
+    type AuthUser = { id: string; user_metadata?: { full_name?: string; name?: string } };
+    const userMap = new Map(((authUsers?.users ?? []) as unknown as AuthUser[]).map((u) => [u.id, u]));
+    for (const id of stillMissingIds) {
+      const u = userMap.get(id);
+      if (!u) continue;
+      const name = (u.user_metadata?.full_name || u.user_metadata?.name || "").trim();
+      if (!name) continue;
+      const existing = profileMap.get(id);
+      profileMap.set(id, { ...(existing ?? { id, education: "", skills: [], experience: [], resume_url: null }), full_name: name });
     }
   }
 
