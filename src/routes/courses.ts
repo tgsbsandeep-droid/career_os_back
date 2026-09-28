@@ -517,6 +517,18 @@ router.get("/:id/students", async (req, res) => {
   if (profileError) return res.status(500).json({ success: false, message: profileError.message });
   const profileRecords = (profiles ?? []) as CandidateProfileRecord[];
   const profileMap = new Map(profileRecords.map((profile) => [profile.id, profile]));
+
+  // Fall back to auth profiles for candidates whose candidate_profile has no name
+  const missingNameIds = candidateIds.filter((id) => !profileMap.get(id)?.full_name?.trim());
+  if (missingNameIds.length) {
+    const { data: authProfiles } = await auth.client.from("profiles").select("id, full_name").in("id", missingNameIds);
+    for (const row of (authProfiles ?? []) as { id: string; full_name?: string }[]) {
+      if (!row?.id || !row.full_name?.trim()) continue;
+      const existing = profileMap.get(row.id);
+      profileMap.set(row.id, { ...(existing ?? { id: row.id, education: "", skills: [], experience: [], resume_url: null }), full_name: row.full_name });
+    }
+  }
+
   return res.json({ success: true, students: enrollmentRecords.map((enrollment) => ({ ...enrollment, profile: profileMap.get(enrollment.candidate_id) ?? null })) });
 });
 
