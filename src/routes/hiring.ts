@@ -344,7 +344,12 @@ router.patch("/offers/:id", async (req: Request, res: Response) => {
   if (req.body?.status != null) {
     const status = String(req.body.status).trim().toLowerCase();
     if (!OFFER_STATUSES.includes(status as (typeof OFFER_STATUSES)[number])) return res.status(400).json({ success: false, message: "Invalid offer status." });
-    if (current.status === "accepted" && status !== "accepted") {
+    // Recruiters may only move an offer to draft or sent.
+    // accepted / declined are candidate-only actions (handled by PATCH /offers/:id/respond).
+    if (status === "accepted" || status === "declined") {
+      return res.status(403).json({ success: false, message: "Only the candidate can accept or decline an offer." });
+    }
+    if (current.status === "accepted") {
       return res.status(400).json({ success: false, message: "An accepted offer cannot be changed." });
     }
     patch.status = status;

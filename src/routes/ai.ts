@@ -34,13 +34,12 @@ router.post("/career-advice", async (req: Request, res: Response) => {
   if (!await requireAuth(req, res)) return;
   try {
     const body = req.body ?? {};
+    // Frontend sends: name, skills, experience (string[]), targetRole
     const sanitized = {
-      current_role:    trunc(body.current_role, 120),
-      target_role:     trunc(body.target_role, 120),
-      skills:          Array.isArray(body.skills) ? body.skills.slice(0, 40).map((s: unknown) => trunc(s, 80)) : [],
-      experience_years: Number(body.experience_years ?? 0),
-      education:       trunc(body.education, 200),
-      goals:           trunc(body.goals, 500),
+      name:       trunc(body.name, 120),
+      skills:     Array.isArray(body.skills) ? body.skills.slice(0, 40).map((s: unknown) => trunc(s, 80)) : [],
+      experience: Array.isArray(body.experience) ? body.experience.slice(0, 20).map((e: unknown) => trunc(e, 200)) : [],
+      targetRole: trunc(body.targetRole, 120),
     };
     const result = await generateCareerAdvice(sanitized);
     res.json({ success: true, result });
@@ -54,10 +53,11 @@ router.post("/resume-optimize", async (req: Request, res: Response) => {
   if (!await requireAuth(req, res)) return;
   try {
     const body = req.body ?? {};
+    // Service expects: resumeText, targetRole, skills[]
     const sanitized = {
-      resumeText:  trunc(body.resumeText, 8000),
-      targetRole:  trunc(body.targetRole, 120),
-      jobDescription: trunc(body.jobDescription, 3000),
+      resumeText: trunc(body.resumeText, 8000),
+      targetRole: trunc(body.targetRole, 120),
+      skills:     Array.isArray(body.skills) ? body.skills.slice(0, 40).map((s: unknown) => trunc(s, 80)) : [],
     };
     const result = await optimizeResume(sanitized);
     res.json({ success: true, result });
@@ -71,10 +71,16 @@ router.post("/interview-question", async (req: Request, res: Response) => {
   if (!await requireAuth(req, res)) return;
   try {
     const body = req.body ?? {};
+    // Service expects: role, skills[], difficulty, questionType, previousQuestions[]
+    const VALID_DIFFICULTY = ["easy", "medium", "hard"] as const;
+    const VALID_TYPE = ["behavioral", "technical", "situational"] as const;
+    const difficulty = VALID_DIFFICULTY.includes(body.difficulty) ? body.difficulty : "medium";
+    const questionType = VALID_TYPE.includes(body.questionType) ? body.questionType : "technical";
     const sanitized = {
       role:       trunc(body.role, 120),
-      level:      trunc(body.level, 60),
-      topic:      trunc(body.topic, 200),
+      skills:     Array.isArray(body.skills) ? body.skills.slice(0, 20).map((s: unknown) => trunc(s, 80)) : [],
+      difficulty,
+      questionType,
       previousQuestions: Array.isArray(body.previousQuestions)
         ? body.previousQuestions.slice(0, 20).map((q: unknown) => trunc(q, 300))
         : [],
@@ -138,7 +144,7 @@ router.post("/job-description", async (req: Request, res: Response) => {
     }
     const sanitized = {
       title,
-      company:          trunc(body.company, 120),
+      company_name:     trunc(body.company_name ?? body.company, 120),
       location:         trunc(body.location, 120),
       employment_type:  trunc(body.employment_type, 60),
       experience_level: trunc(body.experience_level, 60),
@@ -327,12 +333,23 @@ router.post("/assistant", async (req: Request, res: Response) => {
       res.status(400).json({ success: false, message: "Message is required" });
       return;
     }
-    const sanitized = {
-      message,
-      context: trunc(body.context, 1000),
-      role:    trunc(body.role, 120),
+    // Service expects: message, history (turn array), profile (name/skills/experience/targetRole)
+    const rawHistory = Array.isArray(body.history) ? body.history : [];
+    const history = rawHistory.slice(-12).map((turn: unknown) => {
+      const t = turn as { role?: unknown; content?: unknown };
+      return {
+        role: t.role === "assistant" ? "assistant" as const : "user" as const,
+        content: trunc(t.content, 1000),
+      };
+    });
+    const rawProfile = body.profile && typeof body.profile === "object" ? body.profile as Record<string, unknown> : {};
+    const profile = {
+      name:       trunc(rawProfile["name"], 120),
+      skills:     Array.isArray(rawProfile["skills"]) ? rawProfile["skills"].slice(0, 40).map((s: unknown) => trunc(s, 80)) : [],
+      experience: Array.isArray(rawProfile["experience"]) ? rawProfile["experience"].slice(0, 20).map((e: unknown) => trunc(e, 200)) : [],
+      targetRole: trunc(rawProfile["targetRole"], 120),
     };
-    const result = await chatWithAssistant(sanitized);
+    const result = await chatWithAssistant({ message, history, profile });
     res.json({ success: true, result });
   } catch (error) {
     console.error(error);

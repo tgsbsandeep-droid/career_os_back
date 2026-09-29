@@ -592,6 +592,22 @@ router.post("/:id/apply", async (req: Request, res: Response) => {
   if (!job || (jobStatus !== "open" && jobStatus !== "published")) {
     return res.status(404).json({ success: false, message: "Job not found" });
   }
+
+  // Check for an existing application — re-applying must not overwrite shortlisted/interview/hired status.
+  const { data: existing } = await client
+    .from("applications")
+    .select("id, status")
+    .eq("candidate_id", currentUser.id)
+    .eq("job_id", req.params.id)
+    .maybeSingle();
+  if (existing) {
+    return res.status(409).json({
+      success: false,
+      message: "You have already applied for this job",
+      application: existing,
+    });
+  }
+
   const resumeUrl = String(req.body?.resume_url ?? "").trim() || null;
   const coverLetter = String(req.body?.cover_letter ?? req.body?.notes ?? "").trim() || null;
   const payloads: Record<string, unknown>[] = [
@@ -602,7 +618,7 @@ router.post("/:id/apply", async (req: Request, res: Response) => {
   let data: unknown = null;
   let errorMessage = "";
   for (const payload of payloads) {
-    const result = await client.from("applications").upsert(payload, { onConflict: "candidate_id,job_id" }).select().single();
+    const result = await client.from("applications").insert(payload).select().single();
     if (!result.error) {
       data = result.data;
       errorMessage = "";
