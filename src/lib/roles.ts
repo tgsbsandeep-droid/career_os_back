@@ -37,13 +37,11 @@ type UserLike =
  */
 export function collectRoles(user: UserLike): Set<string> {
   const app = user?.app_metadata ?? {};
-  const meta = user?.user_metadata ?? {};
+  // user_metadata is client-writable and must NOT be trusted for role gating.
+  // Only app_metadata (set by server/admin) is authoritative.
   const combined = [
     ...(Array.isArray(app["roles"]) ? (app["roles"] as unknown[]) : []),
     app["role"],
-    ...(Array.isArray(meta["roles"]) ? (meta["roles"] as unknown[]) : []),
-    meta["role"],
-    meta["active_role"],
   ];
   const seen = new Set<string>();
   for (const raw of combined) {
