@@ -1,6 +1,6 @@
 import express = require("express");
 const { createAuthenticatedClient } = require("../lib/supabase");
-import { requireAcademy } from "../lib/authz";
+import { requireAcademy, safeHttpUrl } from "../lib/authz";
 
 const router = express.Router();
 
@@ -89,8 +89,12 @@ function profilePayload(userId: string, body: Record<string, unknown>, includeUs
   const avatar_url = asString(body.avatar_url) || null;
   const location = asString(body.location);
   const languages = asStringArray(body.languages);
-  const website = asString(body.website) || null;
-  const linkedin_url = asString(body.linkedin_url) || null;
+  const websiteRaw = asString(body.website) || null;
+  const linkedinRaw = asString(body.linkedin_url) || null;
+  if (websiteRaw) safeHttpUrl(websiteRaw, "Website URL");
+  if (linkedinRaw) safeHttpUrl(linkedinRaw, "LinkedIn URL");
+  const website = websiteRaw;
+  const linkedin_url = linkedinRaw;
   const phone = asString(body.phone);
   const contact_email = asString(body.contact_email);
   const teaching_experience_years = asOptionalNumber(body.teaching_experience_years);

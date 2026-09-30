@@ -2,7 +2,9 @@ import express = require("express");
 const { createAuthenticatedClient } = require("../lib/supabase");
 const { sendInterviewInvitation } = require("../lib/mail");
 import type { Request, Response } from "express";
-import { requireUser as sharedRequireUser, requireRecruiter as sharedRequireRecruiter, type AuthContext } from "../lib/authz";
+import { requireUser as sharedRequireUser, requireRecruiter as sharedRequireRecruiter, getRecruiterProfileId as sharedGetRecruiterProfileId, ownsJob as sharedOwnsJob, type AuthContext } from "../lib/authz";
+import { validateBody, zStr, zOptStr } from "../lib/validate";
+import { z } from "zod";
 
 const router = express.Router();
 
@@ -54,20 +56,8 @@ function missingWrite(res: Response, error: { message?: string } | null) {
 const requireUser = sharedRequireUser;
 const requireRecruiter = sharedRequireRecruiter;
 
-async function getRecruiterProfileId(client: Auth["client"], userId: string): Promise<string | null> {
-  const byUser = await client.from("recruiter_profiles").select("id").eq("user_id", userId).maybeSingle();
-  if (byUser.data?.id) return byUser.data.id;
-  const byId = await client.from("recruiter_profiles").select("id").eq("id", userId).maybeSingle();
-  return byId.data?.id ?? null;
-}
-
-async function ownsJob(client: Auth["client"], jobId: string, userId: string) {
-  const { data } = await client.from("jobs").select("id, owner_id, employer_id, recruiter_id").eq("id", jobId).maybeSingle();
-  if (!data) return false;
-  if (data.owner_id === userId || data.employer_id === userId) return true;
-  const recruiterId = await getRecruiterProfileId(client, userId);
-  return Boolean(recruiterId && data.recruiter_id === recruiterId);
-}
+const getRecruiterProfileId = sharedGetRecruiterProfileId;
+const ownsJob = sharedOwnsJob;
 
 async function loadOwnedApplication(auth: Auth, applicationId: string) {
   const { data: application } = await auth.client.from("applications").select("id, job_id, candidate_id, status").eq("id", applicationId).maybeSingle();
@@ -83,12 +73,19 @@ function splitScheduledAt(value: string) {
   return { date: iso.slice(0, 10), time: iso.slice(11, 16) };
 }
 
-function combineScheduledAt(date: unknown, time: unknown) {
+function combineScheduledAt(date: unknown, time: unknown, tzOffset: unknown) {
   const day = String(date ?? "").trim();
   const clock = String(time ?? "10:00").trim() || "10:00";
   if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return null;
   if (!/^\d{2}:\d{2}$/.test(clock)) return null;
-  const stamp = new Date(`${day}T${clock}:00`);
+  // tzOffset should be a string like "+05:30" or "-08:00".
+  // If provided, build a full ISO-8601 string so the Date is parsed in the
+  // recruiter's local timezone rather than the server's UTC timezone.
+  const offset = String(tzOffset ?? "").trim();
+  const isoString = offset && /^[+-]\d{2}:\d{2}$/.test(offset)
+    ? `${day}T${clock}:00${offset}`
+    : `${day}T${clock}:00Z`; // fall back to UTC if no offset supplied
+  const stamp = new Date(isoString);
   if (Number.isNaN(stamp.getTime())) return null;
   return stamp.toISOString();
 }
@@ -156,14 +153,16 @@ async function setApplicationStatus(client: Auth["client"], applicationId: strin
 }
 
 async function candidateEmailFor(client: Auth["client"], candidateId: string) {
-  const profile = await client.from("candidate_profiles").select("contact_email, full_name").eq("id", candidateId).maybeSingle();
+  const profile = await client.from("candidate_profiles").select("contact_email").eq("id", candidateId).maybeSingle();
   const contact = String((profile.data as { contact_email?: string } | null)?.contact_email ?? "").trim();
   if (contact.includes("@")) return contact;
-  const fallback = await client.from("profiles").select("full_name").eq("id", candidateId).maybeSingle();
-  void fallback;
-  return "";
+  // Fall back to the auth email stored in the profiles table.
+  const authProfile = await client.from("profiles").select("email").eq("id", candidateId).maybeSingle();
+  const authEmail = String((authProfile.data as { email?: string } | null)?.email ?? "").trim();
+  return authEmail.includes("@") ? authEmail : "";
 }
 
+/** Returns an error string on failure, null on success. */
 async function notifyInterview(client: Auth["client"], interview: {
   candidate_id: string;
   candidateName?: string;
@@ -173,19 +172,25 @@ async function notifyInterview(client: Auth["client"], interview: {
   mode?: string;
   notes?: string;
   scheduled_at?: string;
-}, reschedule = false) {
+}, reschedule = false): Promise<string | null> {
   const to = await candidateEmailFor(client, interview.candidate_id);
-  await sendInterviewInvitation({
-    to,
-    candidateName: String(interview.candidateName ?? "").trim() || "there",
-    jobTitle: String(interview.jobTitle ?? "").trim() || "the role",
-    date: String(interview.date ?? ""),
-    time: String(interview.time ?? ""),
-    mode: String(interview.mode ?? "video"),
-    notes: String(interview.notes ?? ""),
-    scheduledAt: interview.scheduled_at,
-    reschedule,
-  });
+  if (!to) return "No email address found for candidate — invitation not sent.";
+  try {
+    await sendInterviewInvitation({
+      to,
+      candidateName: String(interview.candidateName ?? "").trim() || "there",
+      jobTitle: String(interview.jobTitle ?? "").trim() || "the role",
+      date: String(interview.date ?? ""),
+      time: String(interview.time ?? ""),
+      mode: String(interview.mode ?? "video"),
+      notes: String(interview.notes ?? ""),
+      scheduledAt: interview.scheduled_at,
+      reschedule,
+    });
+    return null;
+  } catch (err) {
+    return err instanceof Error ? err.message : "Failed to send interview invitation.";
+  }
 }
 
 router.get("/interviews", async (req: Request, res: Response) => {
@@ -199,15 +204,26 @@ router.get("/interviews", async (req: Request, res: Response) => {
   return res.json({ success: true, interviews: await decorateInterviews(auth.client, rows) });
 });
 
+const CreateInterviewSchema = z.object({
+  application_id: zStr("Application").optional(),
+  applicantId: zStr("Applicant").optional(),
+  mode: z.enum(["video", "phone", "onsite"]).optional().default("video"),
+  notes: zOptStr(),
+  date: zOptStr(),
+  time: zOptStr(),
+  tz_offset: zOptStr(),
+  scheduled_at: zOptStr(),
+}).refine((d) => d.application_id || d.applicantId, { message: "Select an applicant." });
+
 router.post("/interviews", async (req: Request, res: Response) => {
   const auth = await requireRecruiter(req, res);
   if (!auth) return;
-  const applicationId = String(req.body?.application_id ?? req.body?.applicantId ?? "").trim();
-  const mode = String(req.body?.mode ?? "video").trim().toLowerCase();
-  const notes = String(req.body?.notes ?? "").trim();
-  const scheduledAt = combineScheduledAt(req.body?.date, req.body?.time) ?? String(req.body?.scheduled_at ?? "").trim();
-  if (!applicationId) return res.status(400).json({ success: false, message: "Select an applicant." });
-  if (!INTERVIEW_MODES.includes(mode as (typeof INTERVIEW_MODES)[number])) return res.status(400).json({ success: false, message: "Interview mode must be video, phone, or onsite." });
+  const parsed = validateBody(req, res, CreateInterviewSchema);
+  if (!parsed) return;
+  const applicationId = String(parsed.application_id ?? parsed.applicantId ?? "").trim();
+  const mode = parsed.mode ?? "video";
+  const notes = String(parsed.notes ?? "").trim();
+  const scheduledAt = combineScheduledAt(parsed.date, parsed.time, parsed.tz_offset) ?? String(parsed.scheduled_at ?? "").trim();
   if (!scheduledAt || Number.isNaN(new Date(scheduledAt).getTime())) return res.status(400).json({ success: false, message: "Choose a valid interview date and time." });
   if (new Date(scheduledAt).getTime() < Date.now() - 60_000) return res.status(400).json({ success: false, message: "Interview time must be in the future." });
 
@@ -232,8 +248,12 @@ router.post("/interviews", async (req: Request, res: Response) => {
   if (error) return missingWrite(res, error);
   if (application.status !== "hired") await setApplicationStatus(auth.client, application.id, "interview");
   const [interview] = await decorateInterviews(auth.client, [data as InterviewRow]);
-  if (interview) void notifyInterview(auth.client, interview);
-  return res.status(201).json({ success: true, interview });
+  let notifyWarning: string | undefined;
+  if (interview) {
+    const notifyErr = await notifyInterview(auth.client, interview);
+    if (notifyErr) notifyWarning = notifyErr;
+  }
+  return res.status(201).json({ success: true, interview, ...(notifyWarning ? { warning: notifyWarning } : {}) });
 });
 
 router.patch("/interviews/:id", async (req: Request, res: Response) => {
@@ -256,7 +276,7 @@ router.patch("/interviews/:id", async (req: Request, res: Response) => {
     if (!INTERVIEW_STATUSES.includes(status as (typeof INTERVIEW_STATUSES)[number])) return res.status(400).json({ success: false, message: "Invalid interview status." });
     patch.status = status;
   }
-  const nextStamp = req.body?.date || req.body?.time ? combineScheduledAt(req.body?.date ?? splitScheduledAt(current.scheduled_at).date, req.body?.time ?? splitScheduledAt(current.scheduled_at).time) : req.body?.scheduled_at;
+  const nextStamp = req.body?.date || req.body?.time ? combineScheduledAt(req.body?.date ?? splitScheduledAt(current.scheduled_at).date, req.body?.time ?? splitScheduledAt(current.scheduled_at).time, req.body?.tz_offset) : req.body?.scheduled_at;
   if (nextStamp) {
     if (Number.isNaN(new Date(String(nextStamp)).getTime())) return res.status(400).json({ success: false, message: "Choose a valid interview date and time." });
     patch.scheduled_at = new Date(String(nextStamp)).toISOString();
@@ -266,10 +286,12 @@ router.patch("/interviews/:id", async (req: Request, res: Response) => {
   if (error) return missingWrite(res, error);
   const [interview] = await decorateInterviews(auth.client, [data as InterviewRow]);
   const detailsChanged = Boolean(patch.scheduled_at || patch.mode || patch.notes);
+  let notifyWarning: string | undefined;
   if (interview && detailsChanged && interview.status !== "cancelled") {
-    void notifyInterview(auth.client, interview, true);
+    const notifyErr = await notifyInterview(auth.client, interview, true);
+    if (notifyErr) notifyWarning = notifyErr;
   }
-  return res.json({ success: true, interview });
+  return res.json({ success: true, interview, ...(notifyWarning ? { warning: notifyWarning } : {}) });
 });
 
 router.delete("/interviews/:id", async (req: Request, res: Response) => {

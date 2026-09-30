@@ -3,13 +3,13 @@ services:
     name: career-os-back
     runtime: node
     plan: free
-    buildCommand: npm install --include=dev && npm run build
+    buildCommand: npm install && npm run build
     startCommand: npm start
     envVars:
       - key: NODE_ENV
         value: production
       - key: GEMINI_MODEL
-        value: gemini-3.6-flash
+        value: gemini-2.0-flash
       - key: FRONTEND_URL
         sync: false
       - key: SUPABASE_URL

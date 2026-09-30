@@ -83,6 +83,31 @@ export async function requireAcademy(req: Request, res: Response): Promise<AuthC
  *
  * Same two-step check as requireAcademy.
  */
+// ── URL validation ────────────────────────────────────────────────────────────
+
+/**
+ * Validate that a user-supplied URL is http or https.
+ * Returns the trimmed URL if valid, null if empty, or throws a TypeError
+ * with a user-facing message if the scheme is not http(s).
+ *
+ * This prevents javascript: and data: URLs from being stored and later
+ * rendered in <a href> or <img src> attributes.
+ */
+export function safeHttpUrl(raw: unknown, fieldName = "URL"): string | null {
+  const value = String(raw ?? "").trim();
+  if (!value) return null;
+  try {
+    const parsed = new URL(value);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      throw new TypeError(`${fieldName} must start with http:// or https://`);
+    }
+    return value;
+  } catch (err) {
+    if (err instanceof TypeError && err.message.includes("must start with")) throw err;
+    throw new TypeError(`${fieldName} is not a valid URL`);
+  }
+}
+
 export async function requireRecruiter(req: Request, res: Response): Promise<AuthContext | null> {
   const auth = await requireUser(req, res);
   if (!auth) return null;
@@ -94,4 +119,62 @@ export async function requireRecruiter(req: Request, res: Response): Promise<Aut
 
   res.status(403).json({ success: false, message: "Recruiter or employer access required" });
   return null;
+}
+
+// ── Shared job-ownership helpers ─────────────────────────────────────────────
+
+/**
+ * Resolve the recruiter_profiles.id for a given auth user UUID.
+ * The live schema uses id = auth.users(id); later migrations also add user_id.
+ */
+export async function getRecruiterProfileId(
+  client: ReturnType<typeof createAuthenticatedClient>,
+  userId: string,
+): Promise<string | null> {
+  const byUser = await client.from("recruiter_profiles").select("id").eq("user_id", userId).maybeSingle();
+  if (byUser.data?.id) return byUser.data.id as string;
+  const byId = await client.from("recruiter_profiles").select("id").eq("id", userId).maybeSingle();
+  return (byId.data?.id as string) ?? null;
+}
+
+/**
+ * Return true when `userId` owns the job identified by `jobId`.
+ * Checks owner_id, employer_id, and recruiter_id (via recruiter_profiles).
+ */
+export async function ownsJob(
+  client: ReturnType<typeof createAuthenticatedClient>,
+  jobId: string,
+  userId: string,
+): Promise<boolean> {
+  const { data } = await client
+    .from("jobs")
+    .select("id, owner_id, employer_id, recruiter_id")
+    .eq("id", jobId)
+    .maybeSingle();
+  if (!data) return false;
+  const row = data as { owner_id?: string | null; employer_id?: string | null; recruiter_id?: string | null };
+  if (row.owner_id === userId || row.employer_id === userId) return true;
+  if (!row.recruiter_id) return false;
+  const recruiterId = await getRecruiterProfileId(client, userId);
+  return Boolean(recruiterId && row.recruiter_id === recruiterId);
+}
+
+// ── Safe error serialisation ──────────────────────────────────────────────────
+
+/**
+ * Return a safe, client-facing error message.
+ *
+ * Raw Supabase error messages can leak schema details (table names, column
+ * names, RLS policy names). This helper returns the raw message only in
+ * development; in production it returns a generic fallback unless the caller
+ * supplies an explicit override.
+ */
+export function safeErrorMessage(
+  err: { message?: string } | null | undefined,
+  fallback = "An unexpected error occurred.",
+): string {
+  if (process.env.NODE_ENV !== "production") {
+    return err?.message ?? fallback;
+  }
+  return fallback;
 }

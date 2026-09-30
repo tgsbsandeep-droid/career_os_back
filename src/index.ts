@@ -1,6 +1,8 @@
 import path = require("path");
 import express = require("express");
 import cors = require("cors");
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const helmet = require("helmet") as { default: () => import("express").RequestHandler };
 import dotenv = require("dotenv");
 const { rateLimit } = require("./middleware/rateLimit");
 const { requestLog } = require("./middleware/requestLog");
@@ -81,7 +83,10 @@ app.use(
   })
 );
 
-app.use(express.json());
+// Limit request body to 1 MB to prevent memory exhaustion from oversized payloads.
+app.use(express.json({ limit: "1mb" }));
+// Set security-related HTTP response headers.
+app.use(helmet.default());
 app.use(requestLog);
 app.use(rateLimit({ windowMs: 60_000, max: 120, prefix: "api" }));
 

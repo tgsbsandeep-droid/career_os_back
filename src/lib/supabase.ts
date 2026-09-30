@@ -1,5 +1,5 @@
 const { createClient } = require("@supabase/supabase-js");
-const { collectRoles, hasAnyRole } = require("./roles");
+const { collectRoles, hasAnyRole, ROLE_ALIASES } = require("./roles");
 
 const supabaseUrl = process.env.SUPABASE_URL!;
 const supabaseKey = process.env.SUPABASE_PUBLISHABLE_KEY!;
@@ -11,15 +11,6 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 const supabaseAdmin = supabaseServiceKey
   ? createClient(supabaseUrl, supabaseServiceKey, { auth: { persistSession: false } })
   : null;
-
-const PROFILE_ROLE_ALIASES: Record<string, string> = {
-  tutor: "academy",
-  instructor: "academy",
-  training_institute: "candidate",
-  college: "candidate",
-  student: "candidate",
-  employer: "recruiter",
-};
 
 /**
  * Verify a user's role against the server-side `profiles` table.
@@ -54,7 +45,7 @@ async function verifyRoleFromDb(
   const normalizedAllowed = new Set(
     allowed.map((r) => {
       const v = r.trim().toLowerCase();
-      return PROFILE_ROLE_ALIASES[v] ?? v;
+      return (ROLE_ALIASES as Record<string, string>)[v] ?? v;
     }),
   );
   const profileRoles: string[] = [
@@ -63,7 +54,7 @@ async function verifyRoleFromDb(
   ]
     .map((r) => {
       const v = String(r ?? "").trim().toLowerCase();
-      return PROFILE_ROLE_ALIASES[v] ?? v;
+      return (ROLE_ALIASES as Record<string, string>)[v] ?? v;
     })
     .filter(Boolean);
   return profileRoles.some((r) => normalizedAllowed.has(r));
@@ -96,7 +87,15 @@ async function verifyJwtLocally(token: string): Promise<Record<string, any> | nu
 
     // Signature is valid — decode the payload.
     const json = Buffer.from(payloadB64.replace(/-/g, "+").replace(/_/g, "/"), "base64").toString("utf8");
-    return JSON.parse(json) as Record<string, any>;
+    const payload = JSON.parse(json) as Record<string, any>;
+
+    // Explicitly reject expired tokens — never accept a token past its exp claim.
+    const exp = payload["exp"];
+    if (typeof exp !== "number" || Math.floor(Date.now() / 1000) >= exp) {
+      return null; // Treat expired as invalid — caller will return 401.
+    }
+
+    return payload;
   } catch {
     return null;
   }

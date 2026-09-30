@@ -1,5 +1,6 @@
 import express = require("express");
 const { supabase, createAuthenticatedClient, getUserFromToken } = require("../lib/supabase");
+const { safeHttpUrl } = require("../lib/authz");
 
 const router = express.Router();
 
@@ -23,8 +24,14 @@ async function requireCandidate(req: express.Request, res: express.Response) {
     return null;
   }
   const user = await getUser(req);
-  if (!user || req.params.id !== user.id) {
+  if (!user) {
     res.status(401).json({ success: false, message: "Authentication required" });
+    return null;
+  }
+  // The :id in the URL must match the authenticated user — return 403 (not 401)
+  // so the client knows the token is valid but access to this resource is denied.
+  if (req.params.id && req.params.id !== user.id) {
+    res.status(403).json({ success: false, message: "Forbidden" });
     return null;
   }
   return { user, client: createAuthenticatedClient(token) };
@@ -122,6 +129,25 @@ router.put("/:id/profile", async (req, res) => {
   const pick = (key: string, fallback: unknown) => (body[key] !== undefined ? body[key] : fallback);
   const avatarUrl = pick("avatar_url", existing?.avatar_url ?? null);
 
+  // Validate user-supplied URLs — reject non-http(s) schemes (e.g. javascript:)
+  const urlFields: Array<[string, string]> = [
+    ["resume_url", "Resume URL"],
+    ["linkedin_url", "LinkedIn URL"],
+    ["github_url", "GitHub URL"],
+    ["portfolio_url", "Portfolio URL"],
+    ["website_url", "Website URL"],
+    ["avatar_url", "Avatar URL"],
+  ];
+  for (const [field, label] of urlFields) {
+    if (body[field] !== undefined && body[field] !== null && body[field] !== "") {
+      try {
+        safeHttpUrl(body[field], label);
+      } catch (err) {
+        return res.status(400).json({ success: false, message: (err as Error).message });
+      }
+    }
+  }
+
   // candidate_profiles.id IS the auth user id — upsert on id
   const profile: Record<string, unknown> = {
     id: auth.user.id,
@@ -191,7 +217,8 @@ function courseSummaryForEnrollment(course: {
 }
 
 function enrollmentFeePaid(status: string | null | undefined) {
-  return String(status ?? "paid").toLowerCase() !== "unpaid";
+  // Fail closed: treat missing/null payment_status as unpaid, not paid.
+  return String(status ?? "unpaid").toLowerCase() === "paid";
 }
 
 function enrollmentAccessFromRow(row: {
@@ -238,8 +265,10 @@ router.get("/:id/enrollments", async (req, res) => {
     payment_status?: string | null;
     courses?: Parameters<typeof courseSummaryForEnrollment>[0];
   }) => {
+    // Fail closed: if payment columns are missing from the schema, treat as
+    // unpaid so paid courses are not accidentally unlocked.
     const access = enrollmentAccessFromRow({
-      payment_status: missingPay || missingPricing ? "paid" : e.payment_status,
+      payment_status: missingPay || missingPricing ? "unpaid" : e.payment_status,
       courses: e.courses ?? null,
     });
     return {
@@ -378,6 +407,52 @@ router.delete("/:id/saved-courses/:courseId", async (req, res) => {
     .eq("course_id", req.params.courseId);
   if (error) return res.status(500).json({ success: false, message: error.message });
   return res.json({ success: true });
+});
+
+// ── Offline training registrations ──────────────────────────────────────────
+// GET  /:id/offline-training-registrations  — list all registrations for the candidate
+// POST /:id/offline-training-registrations  — upsert a registration (idempotent on training_id)
+// Used by the frontend to sync localStorage entries to the DB on login and
+// to write-through on new registrations so they survive across devices.
+
+router.get("/:id/offline-training-registrations", async (req, res) => {
+  const auth = await requireCandidate(req, res);
+  if (!auth) return;
+  const { data, error } = await auth.client
+    .from("offline_training_registrations")
+    .select("*")
+    .eq("candidate_id", auth.user.id)
+    .order("enrolled_at", { ascending: false });
+  if (error) return res.status(500).json({ success: false, message: error.message });
+  return res.json({ success: true, registrations: data });
+});
+
+router.post("/:id/offline-training-registrations", async (req, res) => {
+  const auth = await requireCandidate(req, res);
+  if (!auth) return;
+  const body = req.body ?? {};
+  const training_id = String(body.training_id ?? "").trim();
+  const registration_id = String(body.registration_id ?? "").trim();
+  const full_name = String(body.full_name ?? "").trim();
+  const email = String(body.email ?? "").trim();
+  const phone = String(body.phone ?? "").trim();
+  const status = body.status === "waitlisted" ? "waitlisted" : "confirmed";
+  const enrolled_at = body.enrolled_at ? String(body.enrolled_at) : new Date().toISOString();
+
+  if (!training_id || !registration_id || !full_name || !email) {
+    return res.status(400).json({ success: false, message: "training_id, registration_id, full_name, and email are required" });
+  }
+
+  const { data, error } = await auth.client
+    .from("offline_training_registrations")
+    .upsert(
+      { candidate_id: auth.user.id, training_id, registration_id, full_name, email, phone, status, enrolled_at },
+      { onConflict: "candidate_id,training_id" },
+    )
+    .select()
+    .single();
+  if (error) return res.status(500).json({ success: false, message: error.message });
+  return res.status(201).json({ success: true, registration: data });
 });
 
 export = router;

@@ -33,53 +33,12 @@ function mailFrom() {
 }
 
 function escapeHtml(value: string) {
-  return String(value)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}port fs = require("fs");
-import path = require("path");
-
-type SendMailInput = {
-  to: string;
-  subject: string;
-  html: string;
-  text: string;
-};
-
-type SendMailResult = { sent: boolean; reason?: string };
-
-type InterviewEmailInput = {
-  to: string;
-  candidateName: string;
-  jobTitle: string;
-  date: string;
-  time: string;
-  mode: string;
-  notes: string;
-  scheduledAt?: string;
-  reschedule?: boolean;
-};
-
-const TEMPLATE_PATH = path.join(__dirname, "..", "..", "emails", "interview-invitation.html");
-
-function env(name: string) {
-  return String(process.env[name] ?? "").trim();
-}
-
-function mailFrom() {
-  return env("MAIL_FROM") || env("SMTP_FROM") || "CareerOS <noreply@careeros.app>";
-}
-
-function escapeHtml(value: string) {
   return Array.from(value).map((ch) => {
-    if (ch === "&") return "&";
-    if (ch === "<") return "<";
-    if (ch === ">") return ">";
+    if (ch === "&") return "&amp;";
+    if (ch === "<") return "&lt;";
+    if (ch === ">") return "&gt;";
     if (ch === '"') return "&#34;";
-    if (ch === "'") return "'";
+    if (ch === "\x27") return "&#39;";
     return ch;
   }).join("");
 }

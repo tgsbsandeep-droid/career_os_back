@@ -3,15 +3,23 @@ declare const require: (moduleName: string) => any;
 const { GoogleGenAI } = require("@google/genai");
 
 const GEMINI_API_KEY = String(process.env.GEMINI_API_KEY ?? "").trim();
-const GEMINI_MODEL = String(process.env.GEMINI_MODEL ?? "").trim() || "gemini-3.6-flash";
+// "gemini-3.6-flash" does not exist. The correct current model is "gemini-2.0-flash".
+// Override via GEMINI_MODEL env var if a newer model is released.
+const GEMINI_MODEL = String(process.env.GEMINI_MODEL ?? "").trim() || "gemini-2.0-flash";
 
 if (!GEMINI_API_KEY) {
-  throw new Error("GEMINI_API_KEY is missing. Add it to backend/.env");
+  // Warn at startup but do NOT throw — a missing key must not crash the server.
+  // AI routes will return 503 until the key is configured.
+  console.warn("[ai.service] GEMINI_API_KEY is not set. AI features will be unavailable.");
 }
 
-const ai = new GoogleGenAI({
-  apiKey: GEMINI_API_KEY,
-});
+// Lazy singleton — only instantiated when the key is present.
+let _ai: InstanceType<typeof GoogleGenAI> | null = null;
+function getAI(): InstanceType<typeof GoogleGenAI> {
+  if (!GEMINI_API_KEY) throw new Error("GEMINI_API_KEY is not configured. Add it to the environment.");
+  if (!_ai) _ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+  return _ai;
+}
 
 async function generateCareerAdvice(
   profile: {
@@ -47,7 +55,7 @@ Provide:
 Keep the answer practical and concise.
 `;
 
-  const response = await ai.models.generateContent({
+  const response = await getAI().models.generateContent({
     model: GEMINI_MODEL,
     contents: prompt,
   });
@@ -78,7 +86,7 @@ Provide a structured resume optimization report with these sections:
 
 Be specific, actionable, and concise.`;
 
-  const response = await ai.models.generateContent({
+  const response = await getAI().models.generateContent({
     model: GEMINI_MODEL,
     contents: prompt,
   });
@@ -112,7 +120,7 @@ Generate ONE interview question. Then provide:
 
 Format clearly with bold headers.`;
 
-  const response = await ai.models.generateContent({
+  const response = await getAI().models.generateContent({
     model: GEMINI_MODEL,
     contents: prompt,
   });
@@ -138,7 +146,7 @@ Provide structured feedback:
 
 Be honest, constructive, and specific.`;
 
-  const response = await ai.models.generateContent({
+  const response = await getAI().models.generateContent({
     model: GEMINI_MODEL,
     contents: prompt,
   });
@@ -175,7 +183,7 @@ ${instructions[type]}
 
 Keep the tone professional, practical, and job-oriented. Format with clear markdown headings.`;
 
-  const response = await ai.models.generateContent({
+  const response = await getAI().models.generateContent({
     model: GEMINI_MODEL,
     contents: prompt,
   });
@@ -215,7 +223,7 @@ Write a complete job description with:
 
 Tone: professional, inclusive, specific. Return markdown only — no preamble.`;
 
-  const response = await ai.models.generateContent({
+  const response = await getAI().models.generateContent({
     model: GEMINI_MODEL,
     contents: prompt,
   });
@@ -324,7 +332,7 @@ Rules:
     });
   }
 
-  const response = await ai.models.generateContent({
+  const response = await getAI().models.generateContent({
     model: GEMINI_MODEL,
     contents: [{ role: "user", parts }],
   });
@@ -357,7 +365,7 @@ Rules:
 - Do not use a generic software-engineering list unless the title is actually an engineering role
 - No sentences, no seniority words, no duplicates`;
 
-  const response = await ai.models.generateContent({
+  const response = await getAI().models.generateContent({
     model: GEMINI_MODEL,
     contents: prompt,
   });
@@ -398,7 +406,7 @@ Return ONLY valid JSON (no markdown fences) as:
 {"matches":[{"id":"...","score":0,"summary":"one sentence","strengths":["..."],"gaps":["..."]}]}
 score is 0-100. Sort matches by score descending.`;
 
-  const response = await ai.models.generateContent({
+  const response = await getAI().models.generateContent({
     model: GEMINI_MODEL,
     contents: prompt,
   });
@@ -439,7 +447,7 @@ Candidate: ${message}
 
 Reply as a concise career coach. Prefer concrete next steps, skill gaps, resume/interview tips, and when useful suggest browsing jobs or courses. Use markdown. Do not invent employers, salaries, or certificates the candidate did not mention.`;
 
-  const response = await ai.models.generateContent({
+  const response = await getAI().models.generateContent({
     model: GEMINI_MODEL,
     contents: prompt,
   });

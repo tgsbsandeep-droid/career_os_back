@@ -1,6 +1,7 @@
 import express = require("express");
 const { createAuthenticatedClient, getUserFromToken, hasAnyRole } = require("../lib/supabase");
 const { parsePageParams, pageMeta } = require("../lib/pagination");
+const { ROLE_ALIASES } = require("../lib/roles");
 
 const router = express.Router();
 
@@ -39,15 +40,6 @@ router.patch("/users/:id/status", async (req, res) => {
   if (error) return res.status(404).json({ success: false, message: "User not found" });
   return res.json({ success: true, user: data });
 });
-
-const ROLE_ALIASES: Record<string, string> = {
-  tutor: "academy",
-  instructor: "academy",
-  training_institute: "candidate",
-  college: "candidate",
-  student: "candidate",
-  employer: "recruiter",
-};
 
 function canonicalRole(raw: unknown) {
   const value = String(raw ?? "").trim().toLowerCase();

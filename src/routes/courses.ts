@@ -1,7 +1,7 @@
 import express = require("express");
 const { supabase, supabaseAdmin, createAuthenticatedClient, getUserFromToken } = require("../lib/supabase");
 const { parsePageParams, pageMeta } = require("../lib/pagination");
-import { requireAcademy, requireUser as requireAuthUser, bearerToken } from "../lib/authz";
+import { requireAcademy, requireUser as requireAuthUser, bearerToken, safeHttpUrl } from "../lib/authz";
 
 const router = express.Router();
 
@@ -92,7 +92,10 @@ function liveBatchWriteFromBody(
   courseId: string,
 ) {
   const start_at = String(body.start_at ?? "").trim();
-  const meeting_url = String(body.meeting_url ?? "").trim();
+  const rawMeetingUrl = String(body.meeting_url ?? "").trim();
+  // Reject non-http(s) meeting links (e.g. javascript:) before storing.
+  if (rawMeetingUrl) safeHttpUrl(rawMeetingUrl, "Meeting URL");
+  const meeting_url = rawMeetingUrl;
   const parsedCapacity = Number(body.capacity);
   return {
     course_id: courseId,
@@ -123,7 +126,11 @@ function liveBatchPatchFromBody(body: {
     const parsedCapacity = Number(body.capacity);
     if (Number.isFinite(parsedCapacity) && parsedCapacity > 0) updates.capacity = Math.floor(parsedCapacity);
   }
-  if (body.meeting_url !== undefined) updates.meeting_url = String(body.meeting_url ?? "").trim();
+  if (body.meeting_url !== undefined) {
+    const rawMeetingUrl = String(body.meeting_url ?? "").trim();
+    if (rawMeetingUrl) safeHttpUrl(rawMeetingUrl, "Meeting URL");
+    updates.meeting_url = rawMeetingUrl;
+  }
   if (body.status !== undefined) updates.status = liveBatchStatus(body.status);
   return updates;
 }
@@ -229,7 +236,8 @@ function courseIsPaid(course: { is_free?: boolean; price?: number | string | nul
 
 function enrollmentFeePaid(row: { payment_status?: string | null } | null | undefined) {
   if (!row) return false;
-  return String(row.payment_status ?? "paid").toLowerCase() !== "unpaid";
+  // Fail closed: treat missing/null payment_status as unpaid, not paid.
+  return String(row.payment_status ?? "unpaid").toLowerCase() === "paid";
 }
 
 function enrollmentUnlocksContent(
@@ -268,7 +276,9 @@ async function loadCandidateEnrollment(
     .eq("candidate_id", userId)
     .eq("course_id", courseId)
     .maybeSingle();
-  return data ? { ...(data as EnrollmentAccessRow), payment_status: "paid", paid_at: null } : null;
+  // Fail closed: if payment columns are missing from the schema, treat as unpaid
+  // so paid courses are not accidentally unlocked.
+  return data ? { ...(data as EnrollmentAccessRow), payment_status: "unpaid", paid_at: null } : null;
 }
 
 async function candidateEnrollmentMap(req: express.Request, userId: string) {
@@ -288,8 +298,9 @@ async function candidateEnrollmentMap(req: express.Request, userId: string) {
     return map;
   }
   const { data } = await client.from("enrollments").select("id, course_id").eq("candidate_id", userId);
+  // Fail closed: if payment columns are missing from the schema, treat as unpaid.
   for (const row of (data ?? []) as EnrollmentAccessRow[]) {
-    if (row.course_id) map.set(String(row.course_id), { ...row, payment_status: "paid" });
+    if (row.course_id) map.set(String(row.course_id), { ...row, payment_status: "unpaid" });
   }
   return map;
 }
@@ -714,10 +725,34 @@ router.post("/:id/pay", async (req, res) => {
   if (!existing) {
     return res.status(400).json({ success: false, message: "Enroll in this course before paying the fee" });
   }
+  // Idempotent: if already paid, return current state without re-writing.
   if (!courseIsPaid(course) || enrollmentFeePaid(existing)) {
     return res.json({ success: true, enrollment: existing, ...enrollmentAccessPayload(course, { ...existing, payment_status: "paid" }) });
   }
   const paidAt = new Date().toISOString();
+  const coursePrice = Number((course as { price?: unknown }).price ?? 0);
+
+  // Record the transaction first so there is an audit trail even if the
+  // enrollment update fails.  Use upsert on (candidate_id, course_id) so
+  // duplicate POSTs don't create duplicate rows.
+  const txPayload = {
+    candidate_id: user.id,
+    course_id: req.params.id,
+    amount: Number.isFinite(coursePrice) && coursePrice > 0 ? coursePrice : 0,
+    currency: "INR",
+    status: "completed",
+    paid_at: paidAt,
+  };
+  const txResult = await client
+    .from("course_transactions")
+    .upsert(txPayload, { onConflict: "candidate_id,course_id" })
+    .select("id")
+    .maybeSingle();
+  // If the table doesn't exist yet, log and continue — don't block payment.
+  if (txResult.error && !/could not find the (?:table|relation)|relation .* does not exist|undefined_table|42P01/i.test(txResult.error.message)) {
+    return res.status(500).json({ success: false, message: txResult.error.message });
+  }
+
   const updated = await client
     .from("enrollments")
     .update({ payment_status: "paid", paid_at: paidAt })

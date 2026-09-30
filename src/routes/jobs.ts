@@ -2,7 +2,9 @@ import express = require("express");
 const { supabase, createAuthenticatedClient, getUserFromToken } = require("../lib/supabase");
 const { parsePageParams, pageMeta } = require("../lib/pagination");
 import type { Request, Response } from "express";
-import { requireRecruiter } from "../lib/authz";
+import { requireRecruiter, getRecruiterProfileId, ownsJob as sharedOwnsJob } from "../lib/authz";
+import { validateBody, zOptStr } from "../lib/validate";
+import { z } from "zod";
 
 const router = express.Router();
 
@@ -130,44 +132,13 @@ async function writeJob(
     break;
   }
 
-  if (action === "insert" && lastError && isRlsError(lastError.message)) {
-    for (const payload of payloads) {
-      const inserted = await client.from("jobs").insert(payload);
-      if (inserted.error) {
-        lastError = inserted.error;
-        if (isMissingColumnError(inserted.error.message) || isRlsError(inserted.error.message)) continue;
-        break;
-      }
-      const fetched = await client
-        .from("jobs")
-        .select("*")
-        .eq("owner_id", userId)
-        .eq("title", payload.title)
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      if (!fetched.error && fetched.data) return { data: fetched.data, error: null };
-      const byEmployer = await client
-        .from("jobs")
-        .select("*")
-        .eq("employer_id", userId)
-        .eq("title", payload.title)
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      if (!byEmployer.error && byEmployer.data) return { data: byEmployer.data, error: null };
-    }
-  }
+  // Do NOT fall back to a title-based lookup after an RLS failure on insert:
+  // that lookup can return the wrong job when the recruiter has multiple jobs
+  // with the same title.  Surface the RLS error so the caller can report it.
 
   return { data: null, error: lastError };
 }
 
-async function getRecruiterProfileId(client: ReturnType<typeof createAuthenticatedClient>, userId: string): Promise<string | null> {
-  const byUser = await client.from("recruiter_profiles").select("id").eq("user_id", userId).maybeSingle();
-  if (byUser.data?.id) return byUser.data.id;
-  const byId = await client.from("recruiter_profiles").select("id").eq("id", userId).maybeSingle();
-  return byId.data?.id ?? null;
-}
 
 async function jobsOwnedBy(client: ReturnType<typeof createAuthenticatedClient>, userId: string) {
   const recruiterId = await getRecruiterProfileId(client, userId);
@@ -195,18 +166,7 @@ function skillOverlap(candidateSkills: string[], jobSkills: string[]) {
   return { score, strengths: strengths.slice(0, 6), gaps: gaps.slice(0, 6) };
 }
 
-async function ownsJob(client: ReturnType<typeof createAuthenticatedClient>, jobId: string, userId: string) {
-  const full = await client.from("jobs").select("id, owner_id, employer_id, recruiter_id").eq("id", jobId).maybeSingle();
-  const fallback = full.error && isMissingColumnError(full.error.message)
-    ? await client.from("jobs").select("id, owner_id, employer_id").eq("id", jobId).maybeSingle()
-    : full;
-  const data = fallback.data as { owner_id?: string | null; employer_id?: string | null; recruiter_id?: string | null } | null;
-  if (!data) return false;
-  if (data.owner_id === userId || data.employer_id === userId) return true;
-  if (!data.recruiter_id) return false;
-  const recruiterId = await getRecruiterProfileId(client, userId);
-  return Boolean(recruiterId && data.recruiter_id === recruiterId);
-}
+const ownsJob = sharedOwnsJob;
 
 type SkillMatch = {
   id: string;
@@ -366,9 +326,15 @@ router.get("/recommended", async (req: Request, res: Response) => {
   const user = await getUserFromToken(token);
   if (!user) return res.status(401).json({ success: false, message: "Authentication required" });
   const client = createAuthenticatedClient(token);
-  const [{ data: profile }, { data: jobs, error: jobsError }, { data: applications }] = await Promise.all([
+  const { limit, offset, from, to } = parsePageParams(req);
+  const [{ data: profile }, { data: jobs, error: jobsError, count }, { data: applications }] = await Promise.all([
     client.from("candidate_profiles").select("skills").eq("id", user.id).maybeSingle(),
-    supabase.from("jobs").select("*").in("status", ["open", "published"]).order("created_at", { ascending: false }),
+    supabase
+      .from("jobs")
+      .select("*", { count: "exact", head: false })
+      .in("status", ["open", "published"])
+      .order("created_at", { ascending: false })
+      .range(from, to),
     client.from("applications").select("job_id").eq("candidate_id", user.id),
   ]);
   if (jobsError) return res.status(500).json({ success: false, message: jobsError.message });
@@ -384,14 +350,31 @@ router.get("/recommended", async (req: Request, res: Response) => {
     .filter((job) => job.match_score > 0)
     .sort((a, b) => b.match_score - a.match_score)
     .slice(0, 12);
-  return res.json({ success: true, jobs: recommendations, skills: candidateSkills });
+  return res.json({ success: true, jobs: recommendations, skills: candidateSkills, page: pageMeta(count ?? 0, limit, offset) });
 });
+
+const JobWriteSchema = z.object({
+  title: z.string().trim().min(1, "Title is required"),
+  description: zOptStr(),
+  status: z.enum(["draft", "open", "published", "closed"]).optional(),
+  location: zOptStr(),
+  employment_type: zOptStr(),
+  job_type: zOptStr(),
+  salary_min: z.number().optional(),
+  salary_max: z.number().optional(),
+  skills: z.array(z.string()).optional(),
+  requirements: zOptStr(),
+  benefits: zOptStr(),
+  experience_level: zOptStr(),
+  remote: z.boolean().optional(),
+}).passthrough(); // allow extra fields buildJobFields may read
 
 router.post("/", async (req: Request, res: Response) => {
   const auth = await requireRecruiter(req, res);
   if (!auth) return;
-  const fields = buildJobFields(req.body ?? {}, auth.user.id);
-  if (!fields.core.title) return res.status(400).json({ success: false, message: "Title is required" });
+  const parsed = validateBody(req, res, JobWriteSchema);
+  if (!parsed) return;
+  const fields = buildJobFields(parsed as Record<string, unknown>, auth.user.id);
   if (fields.core.status !== "draft" && !fields.core.description) {
     return res.status(400).json({ success: false, message: "Description is required to publish" });
   }
@@ -421,8 +404,9 @@ router.put("/:id", async (req: Request, res: Response) => {
   if (!auth) return;
   const jobId = String(req.params.id ?? "");
   if (!(await ownsJob(auth.client, jobId, auth.user.id))) return res.status(404).json({ success: false, message: "Job not found" });
-  const fields = buildJobFields(req.body ?? {}, auth.user.id);
-  if (!fields.core.title) return res.status(400).json({ success: false, message: "Title is required" });
+  const parsed = validateBody(req, res, JobWriteSchema);
+  if (!parsed) return;
+  const fields = buildJobFields(parsed as Record<string, unknown>, auth.user.id);
   if (fields.core.status !== "draft" && !fields.core.description) {
     return res.status(400).json({ success: false, message: "Description is required to publish" });
   }
