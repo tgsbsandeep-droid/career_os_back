@@ -1,13 +1,6 @@
 import fs = require("fs");
 import path = require("path");
 
-type SendMailInput = {
-  to: string;
-  subject: string;
-  html: string;
-  text: string;
-};
-
 type SendMailResult = { sent: boolean; reason?: string };
 
 type InterviewEmailInput = {
@@ -26,10 +19,6 @@ const TEMPLATE_PATH = path.join(__dirname, "..", "..", "emails", "interview-invi
 
 function env(name: string) {
   return String(process.env[name] ?? "").trim();
-}
-
-function mailFrom() {
-  return env("MAIL_FROM") || env("SMTP_FROM") || "CareerOS <noreply@careeros.app>";
 }
 
 function escapeHtml(value: string) {
@@ -55,66 +44,60 @@ function loadTemplate() {
   }
 }
 
-async function sendWithResend(input: SendMailInput, apiKey: string): Promise<SendMailResult> {
-  const response = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
+// ---------------------------------------------------------------------------
+// EmailJS — sends via EmailJS REST API (no browser SDK needed on server)
+// Docs: https://www.emailjs.com/docs/rest-api/send/
+// ---------------------------------------------------------------------------
+async function sendWithEmailJS(params: {
+  toEmail: string;
+  toName: string;
+  subject: string;
+  htmlMessage: string;
+  textMessage: string;
+}): Promise<SendMailResult> {
+  const serviceId  = env("EMAILJS_SERVICE_ID");
+  const templateId = env("EMAILJS_TEMPLATE_ID");
+  const publicKey  = env("EMAILJS_PUBLIC_KEY");
+  const privateKey = env("EMAILJS_PRIVATE_KEY"); // optional — needed for server-side calls
+
+  if (!serviceId || !templateId || !publicKey) {
+    return {
+      sent: false,
+      reason:
+        "EmailJS is not configured. Set EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, and EMAILJS_PUBLIC_KEY in backend/.env.",
+    };
+  }
+
+  const body: Record<string, unknown> = {
+    service_id:  serviceId,
+    template_id: templateId,
+    user_id:     publicKey,
+    template_params: {
+      to_email:     params.toEmail,
+      to_name:      params.toName,
+      subject:      params.subject,
+      html_message: params.htmlMessage,
+      message:      params.textMessage,
     },
-    body: JSON.stringify({
-      from: mailFrom(),
-      to: [input.to],
-      subject: input.subject,
-      html: input.html,
-      text: input.text,
-    }),
+  };
+
+  // If a private key is provided, use the server-side endpoint that requires it
+  if (privateKey) {
+    body["accessToken"] = privateKey;
+  }
+
+  const response = await fetch("https://api.emailjs.com/api/v1.0/email/send", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
   });
+
   if (!response.ok) {
-    const body = await response.text().catch(() => "");
-    return { sent: false, reason: `Resend ${response.status}: ${body.slice(0, 180)}` };
+    const text = await response.text().catch(() => "");
+    return { sent: false, reason: `EmailJS ${response.status}: ${text.slice(0, 200)}` };
   }
-  return { sent: true };
-}
 
-async function sendWithSmtp(input: SendMailInput): Promise<SendMailResult> {
-  let nodemailer: { createTransport: (options: Record<string, unknown>) => { sendMail: (mail: Record<string, unknown>) => Promise<unknown> } };
-  try {
-    nodemailer = require("nodemailer");
-  } catch {
-    return { sent: false, reason: "SMTP is set but nodemailer is not installed. Run npm install nodemailer in backend." };
-  }
-  const port = Number(env("SMTP_PORT") || "587");
-  const secure = env("SMTP_SECURE") === "true" || port === 465;
-  const transporter = nodemailer.createTransport({
-    host: env("SMTP_HOST"),
-    port,
-    secure,
-    auth: env("SMTP_USER")
-      ? { user: env("SMTP_USER"), pass: env("SMTP_PASS") }
-      : undefined,
-  });
-  await transporter.sendMail({
-    from: mailFrom(),
-    to: input.to,
-    subject: input.subject,
-    html: input.html,
-    text: input.text,
-  });
   return { sent: true };
-}
-
-async function sendMail(input: SendMailInput): Promise<SendMailResult> {
-  const to = String(input.to ?? "").trim();
-  if (!to || !to.includes("@")) return { sent: false, reason: "No candidate email on file." };
-  const resendKey = env("RESEND_API_KEY");
-  try {
-    if (resendKey) return await sendWithResend(input, resendKey);
-    if (env("SMTP_HOST")) return await sendWithSmtp(input);
-    return { sent: false, reason: "Email is not configured. Set RESEND_API_KEY or SMTP_HOST in backend/.env." };
-  } catch (err) {
-    return { sent: false, reason: (err as Error).message || "Email send failed." };
-  }
 }
 
 function formatMode(mode: string) {
@@ -164,37 +147,40 @@ function applicationsUrl() {
 }
 
 async function sendInterviewInvitation(input: InterviewEmailInput): Promise<SendMailResult> {
-  const jobTitle = String(input.jobTitle || "the role").trim() || "the role";
+  const jobTitle      = String(input.jobTitle || "the role").trim() || "the role";
   const candidateName = String(input.candidateName || "there").trim() || "there";
-  const date = formatInterviewDate(input.date, input.scheduledAt);
-  const time = formatInterviewTime(input.time, input.scheduledAt);
-  const mode = formatMode(input.mode);
-  const notes = String(input.notes || "").trim() || "None";
-  const headline = input.reschedule ? "Your interview was updated" : "You're invited to interview";
-  const intro = input.reschedule
+  const date          = formatInterviewDate(input.date, input.scheduledAt);
+  const time          = formatInterviewTime(input.time, input.scheduledAt);
+  const mode          = formatMode(input.mode);
+  const notes         = String(input.notes || "").trim() || "None";
+  const headline      = input.reschedule ? "Your interview was updated" : "You're invited to interview";
+  const intro         = input.reschedule
     ? `Your interview for ${jobTitle} was updated. The latest details are below.`
     : `A recruiter scheduled an interview for ${jobTitle}. Details are below.`;
   const subject = input.reschedule
     ? `Interview updated: ${jobTitle}`
     : `Interview invitation: ${jobTitle}`;
+
   const vars = {
-    EMAIL_TITLE: subject,
-    PREVIEW: `${jobTitle} · ${date} · ${time} · ${mode}`,
-    HEADLINE: headline,
-    CANDIDATE_NAME: candidateName,
-    INTRO: intro,
-    JOB_TITLE: jobTitle,
-    DATE: date,
-    TIME: time,
-    MODE: mode,
-    NOTES: notes,
+    EMAIL_TITLE:      subject,
+    PREVIEW:          `${jobTitle} · ${date} · ${time} · ${mode}`,
+    HEADLINE:         headline,
+    CANDIDATE_NAME:   candidateName,
+    INTRO:            intro,
+    JOB_TITLE:        jobTitle,
+    DATE:             date,
+    TIME:             time,
+    MODE:             mode,
+    NOTES:            notes,
     APPLICATIONS_URL: applicationsUrl(),
   };
+
   const template = loadTemplate();
-  const html = template
+  const htmlMessage = template
     ? fillTemplate(template, vars)
     : `<p>Hi ${escapeHtml(candidateName)},</p><p>${escapeHtml(intro)}</p><p>${escapeHtml(jobTitle)} · ${escapeHtml(date)} · ${escapeHtml(time)} · ${escapeHtml(mode)}</p><p>${escapeHtml(notes)}</p>`;
-  const text = [
+
+  const textMessage = [
     `Hi ${candidateName},`,
     intro,
     `Role: ${jobTitle}`,
@@ -204,7 +190,15 @@ async function sendInterviewInvitation(input: InterviewEmailInput): Promise<Send
     `Notes: ${notes}`,
     `View details: ${applicationsUrl()}`,
   ].join("\n");
-  const result = await sendMail({ to: input.to, subject, html, text });
+
+  const result = await sendWithEmailJS({
+    toEmail:     input.to,
+    toName:      candidateName,
+    subject,
+    htmlMessage,
+    textMessage,
+  });
+
   if (!result.sent) {
     console.warn(`[mail] interview invitation not sent to ${input.to}: ${result.reason}`);
   }
@@ -212,7 +206,6 @@ async function sendInterviewInvitation(input: InterviewEmailInput): Promise<Send
 }
 
 export = {
-  sendMail,
   sendInterviewInvitation,
   formatMode,
   applicationsUrl,
