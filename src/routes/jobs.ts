@@ -340,7 +340,7 @@ router.get("/recommended", async (req: Request, res: Response) => {
   if (jobsError) return res.status(500).json({ success: false, message: jobsError.message });
   const candidateSkills = asStringList(profile?.skills);
   const applied = new Set(((applications ?? []) as { job_id: string }[]).map((row) => row.job_id));
-  const recommendations = ((jobs ?? []) as JobRow[])
+  const scored = ((jobs ?? []) as JobRow[])
     .map((row) => normalizeJobRecord(row))
     .filter((job): job is NonNullable<ReturnType<typeof normalizeJobRecord>> => Boolean(job) && !applied.has(String(job?.id)))
     .map((job) => {
@@ -348,9 +348,10 @@ router.get("/recommended", async (req: Request, res: Response) => {
       return { ...job, match_score: match.score, strengths: match.strengths, gaps: match.gaps };
     })
     .filter((job) => job.match_score > 0)
-    .sort((a, b) => b.match_score - a.match_score)
-    .slice(0, 12);
-  return res.json({ success: true, jobs: recommendations, skills: candidateSkills, page: pageMeta(count ?? 0, limit, offset) });
+    .sort((a, b) => b.match_score - a.match_score);
+  const matchCount = scored.length;
+  const recommendations = scored.slice(0, 12);
+  return res.json({ success: true, jobs: recommendations, matchCount, skills: candidateSkills, page: pageMeta(count ?? 0, limit, offset) });
 });
 
 const JobWriteSchema = z.object({
