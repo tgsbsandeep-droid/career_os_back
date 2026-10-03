@@ -52,6 +52,7 @@ function isOriginAllowed(origin: string): boolean {
 
 // These modules read environment variables during initialization, so load them
 // only after dotenv has populated process.env.
+const authRouter: express.Router = require("./routes/auth");
 const candidateRouter: express.Router = require("./routes/candidate");
 const aiRouter: express.Router = require("./routes/ai");
 const jobsRouter: express.Router = require("./routes/jobs");
@@ -93,6 +94,7 @@ app.use(rateLimit({ windowMs: 60_000, max: 120, prefix: "api" }));
 app.use("/api/ai", rateLimit({ windowMs: 60_000, max: 20, prefix: "ai" }));
 app.use("/api/admin", rateLimit({ windowMs: 60_000, max: 60, prefix: "admin" }));
 
+app.use("/api/auth", authRouter);
 app.use("/api/candidate", candidateRouter);
 app.use("/api/candidates", candidateRouter);
 app.use("/api/ai", aiRouter);
