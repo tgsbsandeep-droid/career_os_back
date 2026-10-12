@@ -41,10 +41,18 @@ router.post("/signup", async (req: Request, res: Response) => {
   const selectedRoles = roles ?? [selectedRole];
   const selectedActiveRole = active_role ?? selectedRole;
 
+  // Build the redirect URL that Supabase embeds in the confirmation email.
+  // The frontend /auth/callback route handles the PKCE code exchange.
+  // FRONTEND_URL must be set in backend/.env (and in the Supabase dashboard
+  // under Authentication → URL Configuration → Redirect URLs).
+  const frontendOrigin = String(process.env.FRONTEND_URL ?? "http://localhost:5173").replace(/\/$/, "");
+  const emailRedirectTo = `${frontendOrigin}/auth/callback`;
+
   const { data, error } = await supabase.auth.signUp({
     email: String(email).trim(),
     password,
     options: {
+      emailRedirectTo,
       data: {
         full_name: String(full_name ?? "").trim(),
         role: selectedRole,
